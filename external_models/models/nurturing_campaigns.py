@@ -5,6 +5,7 @@ from django.utils import timezone
 import pytz
 from datetime import datetime, timedelta
 from .external_references import Account, Campaign, Lead
+from .journeys import JourneyEvent
 
 class LeadNurturingCampaign(models.Model):
     CAMPAIGN_TYPES = [
@@ -289,6 +290,62 @@ class JourneyCampaignSchedule(CampaignScheduleBase):
     class Meta:
         managed = False
         db_table = 'asc_journeycampaignschedule'
+
+class CampaignProgressBase(models.Model):
+    """Base model for campaign progress tracking"""
+    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+        managed = False
+
+class DripCampaignProgress(CampaignProgressBase):
+    """Tracks progress for drip campaigns"""
+    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='drip_campaign_progress')
+    last_interval = models.DateTimeField(null=True, blank=True)
+    intervals_completed = models.PositiveIntegerField(default=0)
+    total_intervals = models.PositiveIntegerField()
+    next_scheduled_interval = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'drip_campaign_progress'
+        indexes = [
+            models.Index(fields=['last_interval']),
+            models.Index(fields=['next_scheduled_interval']),
+        ]
+
+class ReminderCampaignProgress(CampaignProgressBase):
+    """Tracks progress for reminder campaigns"""
+    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='reminder_campaign_progress')
+    days_before = models.PositiveIntegerField()
+    sent_at = models.DateTimeField()
+    next_scheduled_reminder = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'reminder_campaign_progress'
+        indexes = [
+            models.Index(fields=['days_before']),
+            models.Index(fields=['sent_at']),
+            models.Index(fields=['next_scheduled_reminder']),
+        ]
+
+class BlastCampaignProgress(CampaignProgressBase):
+    """Tracks progress for blast campaigns"""
+    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='blast_campaign_progress')
+    message_sent = models.BooleanField(default=False)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'blast_campaign_progress'
+        indexes = [
+            models.Index(fields=['message_sent']),
+            models.Index(fields=['sent_at']),
+        ]
 
 class BulkCampaignMessage(models.Model):
     STATUS_CHOICES = [

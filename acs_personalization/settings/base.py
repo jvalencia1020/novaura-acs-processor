@@ -204,3 +204,8 @@ LOGGING = {
         },
     },
 }
+
+TWILIO_ACCOUNT_SID=os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN=os.getenv('TWILIO_AUTH_TOKEN')
+
+AUTH_USER_MODEL = 'external_models.User'

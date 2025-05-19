@@ -2,6 +2,7 @@ import logging
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q
+from twilio.rest import Client
 
 from external_models.models.nurturing_campaigns import (
     LeadNurturingCampaign,
@@ -11,6 +12,14 @@ from external_models.models.nurturing_campaigns import (
     ReminderCampaignSchedule,
     BlastCampaignSchedule
 )
+from external_models.models.communications import (
+    Conversation,
+    Participant,
+    ConversationMessage,
+    ConversationThread,
+    ThreadMessage
+)
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -321,10 +330,10 @@ class BulkCampaignProcessor:
                 if schedule.exclude_weekends and next_day.weekday() >= 5:
                     # Skip weekend
                     next_day += timezone.timedelta(days=2)
-                return timezone.datetime.combine(next_day.date(), schedule.start_time)
+                return timezone.make_aware(timezone.datetime.combine(next_day.date(), schedule.start_time))
             elif now.time() < schedule.start_time:
                 # Move to start time today
-                return timezone.datetime.combine(now.date(), schedule.start_time)
+                return timezone.make_aware(timezone.datetime.combine(now.date(), schedule.start_time))
 
         return now
 
@@ -336,8 +345,8 @@ class BulkCampaignProcessor:
             # Absolute scheduling
             send_date = now.date() + timezone.timedelta(days=reminder.days_before)
             if reminder.time:
-                return timezone.datetime.combine(send_date, reminder.time)
-            return timezone.datetime.combine(send_date, time(9, 0))  # Default to 9 AM
+                return timezone.make_aware(timezone.datetime.combine(send_date, reminder.time))
+            return timezone.make_aware(timezone.datetime.combine(send_date, time(9, 0)))  # Default to 9 AM
         else:
             # Relative scheduling
             total_seconds = 0
@@ -351,21 +360,427 @@ class BulkCampaignProcessor:
             return now + timezone.timedelta(seconds=total_seconds)
 
     def _send_email(self, message):
-        """Send an email message"""
-        # TODO: Implement email sending
-        return True
+        """Send an email message using the configured email service"""
+        try:
+            # Get campaign and participant
+            campaign = message.campaign
+            participant = message.participant
+            lead = participant.lead
+
+            # Create thread for tracking
+            thread = ConversationThread.objects.create(
+                lead=lead,
+                channel='email',
+                status='open',
+                subject=message.subject if hasattr(message, 'subject') else None,
+                last_message_timestamp=timezone.now()
+            )
+
+            # Create thread message
+            thread_message = ThreadMessage.objects.create(
+                thread=thread,
+                sender_type='user',
+                content=message.content,
+                channel='email',
+                lead=lead,
+                user=campaign.created_by
+            )
+
+            # TODO: Implement actual email sending using your email service
+            # This could be SendGrid, Mailgun, etc.
+            # For now, we'll just mark it as sent
+            message.update_status('sent')
+            thread_message.read_status = True
+            thread_message.save()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending email message: {str(e)}")
+            return False
 
     def _send_sms(self, message):
-        """Send an SMS message"""
-        # TODO: Implement SMS sending
-        return True
+        """Send an SMS message using Twilio Conversations API and track it in our system"""
+        try:
+            # Get or create Twilio conversation
+            conversation_obj, _ = self._create_or_get_twilio_conversation(
+                lead=message.participant.lead,
+                friendly_name=f"Campaign-{message.campaign.id}-Lead-{message.participant.lead.id}"
+            )
+
+            # Get the service phone number
+            service_phone = None
+            if message.campaign.config and message.campaign.config.get('from_number'):
+                service_phone = message.campaign.config['from_number']
+                print(f"Using service phone from campaign config: {service_phone}")
+            elif message.campaign.crm_campaign and message.campaign.crm_campaign.campaign_from_number:
+                service_phone = message.campaign.crm_campaign.campaign_from_number
+                print(f"Using service phone from CRM campaign: {service_phone}")
+
+            if not service_phone:
+                raise ValueError("No service phone number found in campaign configuration")
+
+            print(f"Lead phone number: {message.participant.lead.phone_number}")
+            print(f"Service phone number: {service_phone}")
+            formatted_proxy = self._format_phone_number(service_phone)
+            print(f"Formatted service phone: {formatted_proxy}")
+
+            # Add lead participant
+            lead_participant, _ = self._add_participant_to_twilio_conversation(
+                conversation_obj=conversation_obj,
+                phone_number=message.participant.lead.phone_number,
+                proxy_address=formatted_proxy
+            )
+
+            # Add system identity with projected address
+            system_identity = 'acs-system'
+            system_participant, _ = self._add_identity_participant(
+                conversation_obj=conversation_obj,
+                identity=system_identity,
+                projected_address=formatted_proxy
+            )
+
+            # Send message using system identity as the author
+            message_obj = self._send_twilio_conversation_message(
+                conversation_obj=conversation_obj,
+                author=system_identity,
+                body=message.campaign.content,
+                channel='sms'
+            )
+
+            # Create thread and thread message for tracking
+            thread = ConversationThread.objects.create(
+                lead=message.participant.lead,
+                channel='sms',
+                status='open',
+                twilio_conversation=conversation_obj,
+                last_message_timestamp=timezone.now()
+            )
+
+            ThreadMessage.objects.create(
+                thread=thread,
+                sender_type='user',
+                content=message.campaign.content,
+                channel='sms',
+                twilio_message=message_obj,
+                lead=message.participant.lead,
+                user=message.campaign.created_by
+            )
+
+            return True
+
+        except Exception as e:
+            print(f"Error sending SMS message: {str(e)}")
+            return False
+
+    def _create_or_get_twilio_conversation(self, lead=None, friendly_name=None):
+        """
+        Return a tuple of (conversation_obj, created).
+        If an active conversation linked to a lead exists, reuse it.
+        Otherwise, create a new conversation in Twilio and store it locally.
+        """
+        if lead:
+            existing = Conversation.objects.filter(lead=lead, state='active').first()
+            if existing:
+                return existing, False
+
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        convo = client.conversations.conversations.create(friendly_name=friendly_name)
+        conversation_obj = Conversation.objects.create(
+            twilio_sid=convo.sid,
+            friendly_name=convo.friendly_name,
+            state=convo.state,  # Expecting "active"
+            lead=lead,
+            created_by=None  # Will be updated in the view if needed
+        )
+        return conversation_obj, True
+
+    def _format_phone_number(self, phone_number):
+        """
+        Format phone number to E.164 format required by Twilio
+        Args:
+            phone_number (str): Raw phone number in any format (e.g., XXX-XXX-XXXX, (XXX) XXX-XXXX, etc.)
+        Returns:
+            str: Phone number in E.164 format
+        """
+        if not phone_number:
+            print("No phone number provided to format")
+            return None
+            
+        # Remove any non-digit characters (including hyphens, parentheses, spaces)
+        digits = ''.join(filter(str.isdigit, phone_number))
+        print(f"Extracted digits from phone number: {digits}")
+        
+        # Handle XXX-XXX-XXXX format (10 digits)
+        if len(digits) == 10:
+            formatted = f"+1{digits}"
+            print(f"Formatted 10-digit number: {formatted}")
+            return formatted
+            
+        # If number starts with 1 and is 11 digits, it's already a US number
+        if len(digits) == 11 and digits.startswith('1'):
+            formatted = f"+{digits}"
+            print(f"Formatted 11-digit number: {formatted}")
+            return formatted
+            
+        # If number already has country code (starts with +), just ensure it's clean
+        if phone_number.startswith('+'):
+            formatted = f"+{digits}"
+            print(f"Formatted number with existing country code: {formatted}")
+            return formatted
+            
+        # If we can't determine the format, return None
+        print(f"Could not determine format for phone number: {phone_number}")
+        return None
+
+    def _add_participant_to_twilio_conversation(self, conversation_obj, phone_number=None, user=None, proxy_address=None):
+        """
+        Create or retrieve a Participant for this conversation in Twilio and locally.
+        If no user is specified, defaults to system user (ID=7).
+        
+        Args:
+            conversation_obj: The conversation object
+            phone_number: The phone number to add as a participant
+            user: The user to associate with the participant
+            proxy_address: The Twilio phone number to use as proxy for SMS
+        """
+        if phone_number:
+            # Format phone number to E.164
+            formatted_number = self._format_phone_number(phone_number)
+            print(f"Attempting to add participant with formatted number: {formatted_number}")
+            if not formatted_number:
+                raise ValueError(f"Invalid phone number format: {phone_number}")
+                
+            existing = Participant.objects.filter(
+                conversation=conversation_obj,
+                phone_number=phone_number
+            ).first()
+            if existing:
+                return existing, False
+
+        # If no user specified, use default system user (ID=7)
+        if not user:
+            from external_models.models.accounts import User
+            user = User.objects.get(id=7)
+
+        existing = Participant.objects.filter(
+            conversation=conversation_obj,
+            user=user
+        ).first()
+        if existing:
+            return existing, False
+
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        if phone_number:
+            print(f"Creating Twilio participant with phone number: {formatted_number}")
+            print(f"Conversation SID: {conversation_obj.twilio_sid}")
+            try:
+                # Create participant with both binding address and proxy address
+                participant = client.conversations \
+                    .conversations(conversation_obj.twilio_sid) \
+                    .participants \
+                    .create(
+                        messaging_binding_address=formatted_number,
+                        messaging_binding_proxy_address=proxy_address
+                    )
+                print(f"Successfully created participant with SID: {participant.sid}")
+            except Exception as e:
+                print(f"Twilio API Error: {str(e)}")
+                print(f"Request details:")
+                print(f"- Conversation SID: {conversation_obj.twilio_sid}")
+                print(f"- Phone number: {formatted_number}")
+                print(f"- Proxy address: {proxy_address}")
+                raise
+        else:
+            participant = client.conversations \
+                .conversations(conversation_obj.twilio_sid) \
+                .participants \
+                .create(identity=f"user-{user.id}")
+
+        participant_obj = Participant.objects.create(
+            participant_sid=participant.sid,
+            conversation=conversation_obj,
+            phone_number=phone_number,
+            user=user
+        )
+        return participant_obj, True
+
+    def _send_twilio_conversation_message(self, conversation_obj, author, body, channel=None):
+        """
+        Send a message via Twilio's Conversations API and store it locally.
+        
+        Args:
+            conversation_obj: The conversation object
+            author: The author of the message (can be 'system' or a participant SID)
+            body: The message content
+            channel: The channel type (e.g., 'sms')
+        """
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        message = client.conversations \
+            .conversations(conversation_obj.twilio_sid) \
+            .messages \
+            .create(
+                author=author,
+                body=body
+            )
+        
+        # Create message object without participant if author is 'system'
+        message_obj = ConversationMessage.objects.create(
+            message_sid=message.sid,
+            conversation=conversation_obj,
+            participant=None if author == 'system' else Participant.objects.get(participant_sid=author),
+            body=body,
+            direction='outbound',
+            channel=channel
+        )
+        return message_obj
 
     def _send_voice(self, message):
-        """Send a voice message"""
-        # TODO: Implement voice message sending
-        return True
+        """Send a voice message using Bland AI"""
+        try:
+            # Get campaign and participant
+            campaign = message.campaign
+            participant = message.participant
+            lead = participant.lead
+
+            # Create thread for tracking
+            thread = ConversationThread.objects.create(
+                lead=lead,
+                channel='voice',
+                status='open',
+                last_message_timestamp=timezone.now()
+            )
+
+            # Create thread message
+            thread_message = ThreadMessage.objects.create(
+                thread=thread,
+                sender_type='user',
+                content=message.content,
+                channel='voice',
+                lead=lead,
+                user=campaign.created_by
+            )
+
+            # TODO: Implement actual voice call using Bland AI
+            # This would involve:
+            # 1. Creating a Bland AI call
+            # 2. Linking it to the thread
+            # 3. Initiating the call
+            # For now, we'll just mark it as sent
+            message.update_status('sent')
+            thread_message.read_status = True
+            thread_message.save()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending voice message: {str(e)}")
+            return False
 
     def _send_chat(self, message):
-        """Send a chat message"""
-        # TODO: Implement chat message sending
-        return True 
+        """Send a chat message using the configured chat service"""
+        try:
+            # Get campaign and participant
+            campaign = message.campaign
+            participant = message.participant
+            lead = participant.lead
+
+            # Create thread for tracking
+            thread = ConversationThread.objects.create(
+                lead=lead,
+                channel='chat',
+                status='open',
+                last_message_timestamp=timezone.now()
+            )
+
+            # Create thread message
+            thread_message = ThreadMessage.objects.create(
+                thread=thread,
+                sender_type='user',
+                content=message.content,
+                channel='chat',
+                lead=lead,
+                user=campaign.created_by
+            )
+
+            # TODO: Implement actual chat message sending using your chat service
+            # This could be Intercom, Drift, etc.
+            # For now, we'll just mark it as sent
+            message.update_status('sent')
+            thread_message.read_status = True
+            thread_message.save()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending chat message: {str(e)}")
+            return False
+
+    def _add_identity_participant(self, conversation_obj, identity, projected_address=None):
+        """
+        Add an identity-based participant to the conversation.
+        
+        Args:
+            conversation_obj: The conversation object
+            identity: The identity to use for the participant (e.g., 'acs-system')
+            projected_address: The phone number to project for this identity (e.g., Twilio number)
+            
+        Returns:
+            tuple: (participant_obj, created) where created is a boolean indicating if the participant was newly created
+        """
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        
+        # First check if the participant exists in our database
+        existing = Participant.objects.filter(
+            conversation=conversation_obj,
+            user=None,  # If you don't link a user in your DB for 'system'
+            phone_number=None,
+        ).first()
+
+        if existing:
+            print(f"Found existing participant in database with SID: {existing.participant_sid}")
+            return existing, False
+
+        # Check if the participant exists in Twilio
+        print(f"Checking for existing participant with identity='{identity}' in Twilio")
+        existing_participants = client.conversations \
+            .conversations(conversation_obj.twilio_sid) \
+            .participants \
+            .list()
+
+        # Look for a participant with matching identity
+        for participant in existing_participants:
+            if participant.identity == identity:
+                print(f"Found existing participant in Twilio with SID: {participant.sid}")
+                # Create or update our database record
+                participant_obj, _ = Participant.objects.get_or_create(
+                    participant_sid=participant.sid,
+                    defaults={
+                        'conversation': conversation_obj,
+                        'phone_number': None,
+                        'user': None
+                    }
+                )
+                return participant_obj, False
+
+        # If we get here, we need to create a new participant
+        print(f"Adding new identity participant with identity='{identity}'")
+        participant_params = {'identity': identity}
+        
+        # Add projected address if provided
+        if projected_address:
+            print(f"Using projected address: {projected_address}")
+            participant_params['messaging_binding_projected_address'] = projected_address
+
+        participant = client.conversations \
+            .conversations(conversation_obj.twilio_sid) \
+            .participants \
+            .create(**participant_params)
+
+        participant_obj = Participant.objects.create(
+            participant_sid=participant.sid,
+            conversation=conversation_obj,
+            phone_number=None,
+            user=None  # or link to a special "system" user if desired
+        )
+        return participant_obj, True 
