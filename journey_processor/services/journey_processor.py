@@ -5,11 +5,20 @@ import json
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Q
+from twilio.rest import Client
 
 from external_models.models.journeys import Journey, JourneyStep, JourneyStepConnection, JourneyEvent
 from external_models.models.nurturing_campaigns import LeadNurturingParticipant
+from external_models.models.communications import (
+    Conversation,
+    Participant,
+    ConversationMessage,
+    ConversationThread,
+    ThreadMessage
+)
 from crm.models import Lead, FunnelStep
 from journey_processor.services.condition_evaluator import ConditionEvaluator
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -356,10 +365,32 @@ class JourneyProcessor:
             logger.error(f"Email step {step.id} has no template")
             return {'success': False}
 
-        # Send email using template
-        # Implementation depends on your email sending service
         try:
-            # TODO: Implement email sending
+            # Create thread for tracking
+            thread = ConversationThread.objects.create(
+                lead=participant.lead,
+                channel='email',
+                status='open',
+                subject=template.subject if hasattr(template, 'subject') else None,
+                last_message_timestamp=timezone.now()
+            )
+
+            # Create thread message
+            thread_message = ThreadMessage.objects.create(
+                thread=thread,
+                sender_type='user',
+                content=template.content,
+                channel='email',
+                lead=participant.lead,
+                user=step.journey.created_by
+            )
+
+            # TODO: Implement actual email sending using your email service
+            # This could be SendGrid, Mailgun, etc.
+            # For now, we'll just mark it as sent
+            thread_message.read_status = True
+            thread_message.save()
+
             self._create_event(participant, step, 'action_sent', {
                 'template_id': str(template.id)
             })
@@ -375,10 +406,67 @@ class JourneyProcessor:
             logger.error(f"SMS step {step.id} has no template")
             return {'success': False}
 
-        # Send SMS using template
-        # Implementation depends on your SMS sending service
         try:
-            # TODO: Implement SMS sending
+            # Get or create Twilio conversation
+            conversation_obj, _ = self._create_or_get_twilio_conversation(
+                lead=participant.lead,
+                friendly_name=f"Journey-{step.journey.id}-Lead-{participant.lead.id}"
+            )
+
+            # Get the service phone number
+            service_phone = None
+            if step.config and step.config.get('from_number'):
+                service_phone = step.config['from_number']
+            elif step.journey.config and step.journey.config.get('from_number'):
+                service_phone = step.journey.config['from_number']
+
+            if not service_phone:
+                raise ValueError("No service phone number found in step or journey configuration")
+
+            formatted_proxy = self._format_phone_number(service_phone)
+
+            # Add lead participant
+            lead_participant, _ = self._add_participant_to_twilio_conversation(
+                conversation_obj=conversation_obj,
+                phone_number=participant.lead.phone_number,
+                proxy_address=formatted_proxy
+            )
+
+            # Add system identity with projected address
+            system_identity = 'acs-system'
+            system_participant, _ = self._add_identity_participant(
+                conversation_obj=conversation_obj,
+                identity=system_identity,
+                projected_address=formatted_proxy
+            )
+
+            # Send message using system identity as the author
+            message_obj = self._send_twilio_conversation_message(
+                conversation_obj=conversation_obj,
+                author=system_identity,
+                body=template.content,
+                channel='sms'
+            )
+
+            # Create thread and thread message for tracking
+            thread = ConversationThread.objects.create(
+                lead=participant.lead,
+                channel='sms',
+                status='open',
+                twilio_conversation=conversation_obj,
+                last_message_timestamp=timezone.now()
+            )
+
+            ThreadMessage.objects.create(
+                thread=thread,
+                sender_type='user',
+                content=template.content,
+                channel='sms',
+                twilio_message=message_obj,
+                lead=participant.lead,
+                user=step.journey.created_by
+            )
+
             self._create_event(participant, step, 'action_sent', {
                 'template_id': str(template.id)
             })
@@ -388,35 +476,80 @@ class JourneyProcessor:
             return {'success': False}
 
     def _process_voice_step(self, participant, step):
-        """Process a voice call step"""
+        """Process a voice step"""
         template = step.template
         if not template:
             logger.error(f"Voice step {step.id} has no template")
             return {'success': False}
 
-        # Make voice call using template
-        # Implementation depends on your voice calling service
         try:
-            # TODO: Implement voice call
+            # Create thread for tracking
+            thread = ConversationThread.objects.create(
+                lead=participant.lead,
+                channel='voice',
+                status='open',
+                last_message_timestamp=timezone.now()
+            )
+
+            # Create thread message
+            thread_message = ThreadMessage.objects.create(
+                thread=thread,
+                sender_type='user',
+                content=template.content,
+                channel='voice',
+                lead=participant.lead,
+                user=step.journey.created_by
+            )
+
+            # TODO: Implement actual voice call using Bland AI
+            # This would involve:
+            # 1. Creating a Bland AI call
+            # 2. Linking it to the thread
+            # 3. Initiating the call
+            # For now, we'll just mark it as sent
+            thread_message.read_status = True
+            thread_message.save()
+
             self._create_event(participant, step, 'action_sent', {
                 'template_id': str(template.id)
             })
             return {'success': True, 'transition_immediately': True}
         except Exception as e:
-            logger.exception(f"Error making voice call for step {step.id}: {e}")
+            logger.exception(f"Error sending voice call for step {step.id}: {e}")
             return {'success': False}
 
     def _process_chat_step(self, participant, step):
-        """Process a chat message step"""
+        """Process a chat step"""
         template = step.template
         if not template:
             logger.error(f"Chat step {step.id} has no template")
             return {'success': False}
 
-        # Send chat message using template
-        # Implementation depends on your chat service
         try:
-            # TODO: Implement chat message sending
+            # Create thread for tracking
+            thread = ConversationThread.objects.create(
+                lead=participant.lead,
+                channel='chat',
+                status='open',
+                last_message_timestamp=timezone.now()
+            )
+
+            # Create thread message
+            thread_message = ThreadMessage.objects.create(
+                thread=thread,
+                sender_type='user',
+                content=template.content,
+                channel='chat',
+                lead=participant.lead,
+                user=step.journey.created_by
+            )
+
+            # TODO: Implement actual chat message sending using your chat service
+            # This could be Intercom, Drift, etc.
+            # For now, we'll just mark it as sent
+            thread_message.read_status = True
+            thread_message.save()
+
             self._create_event(participant, step, 'action_sent', {
                 'template_id': str(template.id)
             })
@@ -519,3 +652,234 @@ class JourneyProcessor:
         except requests.exceptions.RequestException as e:
             logger.exception(f"Webhook request failed: {e}")
             raise
+
+    def _create_or_get_twilio_conversation(self, lead=None, friendly_name=None):
+        """
+        Return a tuple of (conversation_obj, created).
+        If an active conversation linked to a lead exists, reuse it.
+        Otherwise, create a new conversation in Twilio and store it locally.
+        """
+        if lead:
+            existing = Conversation.objects.filter(lead=lead, state='active').first()
+            if existing:
+                return existing, False
+
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        convo = client.conversations.conversations.create(friendly_name=friendly_name)
+        conversation_obj = Conversation.objects.create(
+            twilio_sid=convo.sid,
+            friendly_name=convo.friendly_name,
+            state=convo.state,  # Expecting "active"
+            lead=lead,
+            created_by=None  # Will be updated in the view if needed
+        )
+        return conversation_obj, True
+
+    def _format_phone_number(self, phone_number):
+        """
+        Format phone number to E.164 format required by Twilio
+        Args:
+            phone_number (str): Raw phone number in any format (e.g., XXX-XXX-XXXX, (XXX) XXX-XXXX, etc.)
+        Returns:
+            str: Phone number in E.164 format
+        """
+        if not phone_number:
+            logger.debug("No phone number provided to format")
+            return None
+            
+        # Remove any non-digit characters (including hyphens, parentheses, spaces)
+        digits = ''.join(filter(str.isdigit, phone_number))
+        logger.debug(f"Extracted digits from phone number: {digits}")
+        
+        # Handle XXX-XXX-XXXX format (10 digits)
+        if len(digits) == 10:
+            formatted = f"+1{digits}"
+            logger.debug(f"Formatted 10-digit number: {formatted}")
+            return formatted
+            
+        # If number starts with 1 and is 11 digits, it's already a US number
+        if len(digits) == 11 and digits.startswith('1'):
+            formatted = f"+{digits}"
+            logger.debug(f"Formatted 11-digit number: {formatted}")
+            return formatted
+            
+        # If number already has country code (starts with +), just ensure it's clean
+        if phone_number.startswith('+'):
+            formatted = f"+{digits}"
+            logger.debug(f"Formatted number with existing country code: {formatted}")
+            return formatted
+            
+        # If we can't determine the format, return None
+        logger.debug(f"Could not determine format for phone number: {phone_number}")
+        return None
+
+    def _add_participant_to_twilio_conversation(self, conversation_obj, phone_number=None, user=None, proxy_address=None):
+        """
+        Create or retrieve a Participant for this conversation in Twilio and locally.
+        If no user is specified, defaults to system user (ID=7).
+        
+        Args:
+            conversation_obj: The conversation object
+            phone_number: The phone number to add as a participant
+            user: The user to associate with the participant
+            proxy_address: The Twilio phone number to use as proxy for SMS
+        """
+        if phone_number:
+            # Format phone number to E.164
+            formatted_number = self._format_phone_number(phone_number)
+            logger.debug(f"Attempting to add participant with formatted number: {formatted_number}")
+            if not formatted_number:
+                raise ValueError(f"Invalid phone number format: {phone_number}")
+                
+            existing = Participant.objects.filter(
+                conversation=conversation_obj,
+                phone_number=phone_number
+            ).first()
+            if existing:
+                return existing, False
+
+        # If no user specified, use default system user (ID=7)
+        if not user:
+            from external_models.models.accounts import User
+            user = User.objects.get(id=7)
+
+        existing = Participant.objects.filter(
+            conversation=conversation_obj,
+            user=user
+        ).first()
+        if existing:
+            return existing, False
+
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        if phone_number:
+            logger.debug(f"Creating Twilio participant with phone number: {formatted_number}")
+            logger.debug(f"Conversation SID: {conversation_obj.twilio_sid}")
+            try:
+                # Create participant with both binding address and proxy address
+                participant = client.conversations \
+                    .conversations(conversation_obj.twilio_sid) \
+                    .participants \
+                    .create(
+                        messaging_binding_address=formatted_number,
+                        messaging_binding_proxy_address=proxy_address
+                    )
+                logger.debug(f"Successfully created participant with SID: {participant.sid}")
+            except Exception as e:
+                logger.error(f"Twilio API Error: {str(e)}")
+                logger.error(f"Request details:")
+                logger.error(f"- Conversation SID: {conversation_obj.twilio_sid}")
+                logger.error(f"- Phone number: {formatted_number}")
+                logger.error(f"- Proxy address: {proxy_address}")
+                raise
+        else:
+            participant = client.conversations \
+                .conversations(conversation_obj.twilio_sid) \
+                .participants \
+                .create(identity=f"user-{user.id}")
+
+        participant_obj = Participant.objects.create(
+            participant_sid=participant.sid,
+            conversation=conversation_obj,
+            phone_number=phone_number,
+            user=user
+        )
+        return participant_obj, True
+
+    def _send_twilio_conversation_message(self, conversation_obj, author, body, channel=None):
+        """
+        Send a message via Twilio's Conversations API and store it locally.
+        
+        Args:
+            conversation_obj: The conversation object
+            author: The author of the message (can be 'system' or a participant SID)
+            body: The message content
+            channel: The channel type (e.g., 'sms')
+        """
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        message = client.conversations \
+            .conversations(conversation_obj.twilio_sid) \
+            .messages \
+            .create(
+                author=author,
+                body=body
+            )
+        
+        # Create message object without participant if author is 'system'
+        message_obj = ConversationMessage.objects.create(
+            message_sid=message.sid,
+            conversation=conversation_obj,
+            participant=None if author == 'system' else Participant.objects.get(participant_sid=author),
+            body=body,
+            direction='outbound',
+            channel=channel
+        )
+        return message_obj
+
+    def _add_identity_participant(self, conversation_obj, identity, projected_address=None):
+        """
+        Add an identity-based participant to the conversation.
+        
+        Args:
+            conversation_obj: The conversation object
+            identity: The identity to use for the participant (e.g., 'acs-system')
+            projected_address: The phone number to project for this identity (e.g., Twilio number)
+            
+        Returns:
+            tuple: (participant_obj, created) where created is a boolean indicating if the participant was newly created
+        """
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        
+        # First check if the participant exists in our database
+        existing = Participant.objects.filter(
+            conversation=conversation_obj,
+            user=None,  # If you don't link a user in your DB for 'system'
+            phone_number=None,
+        ).first()
+
+        if existing:
+            logger.debug(f"Found existing participant in database with SID: {existing.participant_sid}")
+            return existing, False
+
+        # Check if the participant exists in Twilio
+        logger.debug(f"Checking for existing participant with identity='{identity}' in Twilio")
+        existing_participants = client.conversations \
+            .conversations(conversation_obj.twilio_sid) \
+            .participants \
+            .list()
+
+        # Look for a participant with matching identity
+        for participant in existing_participants:
+            if participant.identity == identity:
+                logger.debug(f"Found existing participant in Twilio with SID: {participant.sid}")
+                # Create or update our database record
+                participant_obj, _ = Participant.objects.get_or_create(
+                    participant_sid=participant.sid,
+                    defaults={
+                        'conversation': conversation_obj,
+                        'phone_number': None,
+                        'user': None
+                    }
+                )
+                return participant_obj, False
+
+        # If we get here, we need to create a new participant
+        logger.debug(f"Adding new identity participant with identity='{identity}'")
+        participant_params = {'identity': identity}
+        
+        # Add projected address if provided
+        if projected_address:
+            logger.debug(f"Using projected address: {projected_address}")
+            participant_params['messaging_binding_projected_address'] = projected_address
+
+        participant = client.conversations \
+            .conversations(conversation_obj.twilio_sid) \
+            .participants \
+            .create(**participant_params)
+
+        participant_obj = Participant.objects.create(
+            participant_sid=participant.sid,
+            conversation=conversation_obj,
+            phone_number=None,
+            user=None  # or link to a special "system" user if desired
+        )
+        return participant_obj, True
