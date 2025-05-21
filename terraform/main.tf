@@ -6,9 +6,11 @@ terraform {
     }
   }
   backend "s3" {
-    bucket = "novaura-acs-terraform-state"
-    key    = "novaura-acs-processor/terraform.tfstate"
-    region = "us-east-1"
+    bucket         = "novaura-terraform-state"
+    key            = "ecs/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
   }
 }
 
@@ -87,9 +89,4 @@ variable "db_password_arn" {
 variable "django_secret_key_arn" {
   description = "ARN of the Django secret key in Secrets Manager"
   type        = string
-}
-
-variable "private_subnet_ids" {
-  description = "List of private subnet IDs"
-  type        = list(string)
 } 

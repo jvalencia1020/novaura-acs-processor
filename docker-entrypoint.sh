@@ -24,13 +24,21 @@ echo "Database is ready!"
 
 # Start the specified service
 case "$SERVICE_TYPE" in
-  "scheduler")
-    echo "Starting scheduler service..."
-    python manage.py run_scheduler
+  "bulk_campaign_scheduler")
+    echo "Starting bulk campaign processor scheduler..."
+    exec python manage.py run_bulk_campaign_processor
     ;;
-  "worker")
-    echo "Starting SQS worker service..."
-    python manage.py run_worker
+  "bulk_campaign_worker")
+    echo "Starting bulk campaign processor worker..."
+    exec python manage.py process_due_messages
+    ;;
+  "journey_scheduler")
+    echo "Starting journey processor scheduler..."
+    exec python manage.py run_scheduler
+    ;;
+  "journey_worker")
+    echo "Starting journey processor worker..."
+    exec python manage.py run_worker
     ;;
   *)
     echo "Unknown service type: $SERVICE_TYPE"
