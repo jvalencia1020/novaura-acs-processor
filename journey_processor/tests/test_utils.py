@@ -3,11 +3,11 @@
 import logging
 from django.utils import timezone
 
-from external_models.models.journeys import (
+from external_models.models import (
     Journey, JourneyStep, JourneyStepConnection,
-    JourneyEvent
+    JourneyEvent, LeadNurturingParticipant,
+    Account, Campaign, Funnel, Lead
 )
-from external_models.models.nurturing_campaigns import LeadNurturingParticipant
 from journey_processor.services.journey_processor import JourneyProcessor
 
 logger = logging.getLogger(__name__)
