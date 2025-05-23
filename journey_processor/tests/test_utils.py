@@ -5,8 +5,9 @@ from django.utils import timezone
 
 from external_models.models.journeys import (
     Journey, JourneyStep, JourneyStepConnection,
-    JourneyParticipant, JourneyEvent
+    JourneyEvent
 )
+from external_models.models.nurturing_campaigns import LeadNurturingParticipant
 from journey_processor.services.journey_processor import JourneyProcessor
 
 logger = logging.getLogger(__name__)
@@ -115,9 +116,8 @@ def create_test_journey(account, user):
 def enroll_test_lead(journey, lead, user):
     """Enroll a test lead in a journey"""
     # Create the journey participant
-    participant = JourneyParticipant.objects.create(
+    participant = LeadNurturingParticipant.objects.create(
         lead=lead,
-        journey=journey,
         nurturing_campaign=journey.nurturing_campaigns.first(),
         status="active",
         created_by=user,
