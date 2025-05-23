@@ -5,10 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/journey_processor/tests/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/tests/conftest.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/journey_processor/tests/test_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/tests/test_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
