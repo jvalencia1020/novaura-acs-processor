@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/novaura_acs_personalization.iml" filepath="$PROJECT_DIR$/.idea/novaura_acs_personalization.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/novaura-acs-processor.iml" filepath="$PROJECT_DIR$/.idea/novaura-acs-processor.iml" />
     </modules>
   </component>
 </project>

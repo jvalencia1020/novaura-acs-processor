@@ -84,6 +84,78 @@ resource "aws_route" "nat_gateway" {
   nat_gateway_id         = aws_nat_gateway.nat.id
 }
 
+# Create VPC Endpoints for AWS Services
+resource "aws_vpc_endpoint" "secretsmanager" {
+  vpc_id             = data.aws_vpc.existing.id
+  service_name       = "com.amazonaws.us-east-1.secretsmanager"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = data.aws_subnets.private.ids
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "novaura-acs-secretsmanager-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id             = data.aws_vpc.existing.id
+  service_name       = "com.amazonaws.us-east-1.ecr.api"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = data.aws_subnets.private.ids
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "novaura-acs-ecr-api-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id             = data.aws_vpc.existing.id
+  service_name       = "com.amazonaws.us-east-1.ecr.dkr"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = data.aws_subnets.private.ids
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "novaura-acs-ecr-dkr-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = data.aws_vpc.existing.id
+  service_name      = "com.amazonaws.us-east-1.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [data.aws_route_table.private.id]
+
+  tags = {
+    Name = "novaura-acs-s3-endpoint"
+  }
+}
+
+# Security group for VPC endpoints
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "novaura-acs-vpc-endpoints"
+  description = "Security group for VPC endpoints"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs_service.id]
+  }
+
+  tags = {
+    Name = "novaura-acs-vpc-endpoints-sg"
+  }
+}
+
 # Update the private_subnet_ids variable to use the existing subnets
 locals {
   private_subnet_ids = data.aws_subnets.private.ids
