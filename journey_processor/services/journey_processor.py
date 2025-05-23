@@ -7,14 +7,16 @@ from django.utils import timezone
 from django.db.models import Q
 from twilio.rest import Client
 
-from external_models.models import (
-    Journey, JourneyStep, JourneyStepConnection, JourneyEvent,
-    LeadNurturingParticipant,
-    Conversation, Participant, ConversationMessage,
-    ConversationThread, ThreadMessage,
-    Lead, Step as FunnelStep,
-    User
+from external_models.models.journeys import (
+    Journey, JourneyStep, JourneyStepConnection, JourneyEvent
 )
+from external_models.models.nurturing_campaigns import LeadNurturingParticipant
+from external_models.models.communications import (
+    Conversation, Participant, ConversationMessage,
+    ConversationThread, ThreadMessage
+)
+from external_models.models.external_references import Lead, Step as FunnelStep
+from external_models.models.accounts import User
 from journey_processor.services.condition_evaluator import ConditionEvaluator
 from django.conf import settings
 
