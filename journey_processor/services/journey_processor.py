@@ -53,11 +53,11 @@ class JourneyProcessor:
         Args:
             participant: LeadNurturingParticipant instance
         """
-        if not participant.is_active:
+        if participant.status != 'active':
             logger.debug(f"Skipping inactive participant {participant}")
             return
 
-        if not participant.current_step:
+        if not participant.current_journey_step:
             # New participant - assign to an entry point
             self._assign_entry_point(participant)
         else:
@@ -77,8 +77,13 @@ class JourneyProcessor:
         # Find all active participants with a current step
         active_participants = LeadNurturingParticipant.objects.filter(
             status='active',
-            current_step__isnull=False
-        ).select_related('current_step', 'journey', 'lead')
+            current_journey_step__isnull=False
+        ).select_related(
+            'current_journey_step',
+            'nurturing_campaign',
+            'nurturing_campaign__journey',
+            'lead'
+        )
 
         logger.debug(f"Found {active_participants.count()} active participants")
         processed_count = 0
@@ -86,7 +91,7 @@ class JourneyProcessor:
         for participant in active_participants:
             # Find all delay connections from the current step
             delay_connections = JourneyStepConnection.objects.filter(
-                from_step=participant.current_step,
+                from_step=participant.current_journey_step,
                 trigger_type='delay',
                 is_active=True
             ).select_related('to_step').order_by('priority')
@@ -142,7 +147,12 @@ class JourneyProcessor:
                 participants = LeadNurturingParticipant.objects.filter(
                     lead_id=lead_id,
                     status='active'
-                ).select_related('current_step', 'journey', 'lead')
+                ).select_related(
+                    'current_journey_step',
+                    'nurturing_campaign',
+                    'nurturing_campaign__journey',
+                    'lead'
+                )
             except Exception as e:
                 logger.warning(f"Error finding participants for lead {lead_id}: {e}")
                 return 0
@@ -164,7 +174,7 @@ class JourneyProcessor:
 
         # Check each participant for event-triggered connections
         for participant in participants:
-            if not participant.current_step:
+            if not participant.current_journey_step:
                 continue
 
             # Find connections that might be triggered by this event
@@ -183,13 +193,17 @@ class JourneyProcessor:
 
     def _assign_entry_point(self, participant):
         """Assign a participant to an entry point in the journey"""
-        entry_points = participant.journey.steps.filter(
+        if not participant.nurturing_campaign or not participant.nurturing_campaign.journey:
+            logger.error(f"No journey found for participant {participant.id}")
+            return
+
+        entry_points = participant.nurturing_campaign.journey.steps.filter(
             is_entry_point=True,
             is_active=True
         ).order_by('order')
 
         if not entry_points.exists():
-            logger.error(f"No active entry points found for journey {participant.journey}")
+            logger.error(f"No active entry points found for journey {participant.nurturing_campaign.journey}")
             return
 
         # Start with the first entry point (assuming order is respected)
@@ -198,13 +212,13 @@ class JourneyProcessor:
         logger.info(f"Assigning participant {participant.id} to entry point {entry_point.name}")
 
         # Move to the entry point
-        participant.current_step = entry_point
+        participant.current_journey_step = entry_point
         participant.save()
 
         # Create entry event
         self._create_event(participant, entry_point, 'enter_step', {
             'entry_type': 'initial',
-            'journey_id': str(participant.journey.id)
+            'journey_id': str(participant.nurturing_campaign.journey.id)
         })
 
         # Process the entry point step
@@ -212,7 +226,7 @@ class JourneyProcessor:
 
     def _process_step(self, participant):
         """Process a participant's current step"""
-        current_step = participant.current_step
+        current_step = participant.current_journey_step
 
         if not current_step or not current_step.is_active:
             logger.warning(f"Cannot process inactive or null step for {participant.id}")
@@ -266,7 +280,7 @@ class JourneyProcessor:
                 })
 
                 # Update participant's current step
-                participant.current_step = to_step
+                participant.current_journey_step = to_step
                 participant.save()
 
                 # Record entry to new step
@@ -289,7 +303,7 @@ class JourneyProcessor:
 
         # Event connections
         if event_type:
-            event_connections = participant.current_step.next_connections.filter(
+            event_connections = participant.current_journey_step.next_connections.filter(
                 trigger_type='event',
                 event_type=event_type,
                 is_active=True
@@ -300,7 +314,7 @@ class JourneyProcessor:
         if event_type == 'funnel_step_changed' and 'funnel_step_id' in data:
             funnel_step_id = data.get('funnel_step_id')
             if funnel_step_id:
-                funnel_connections = participant.current_step.next_connections.filter(
+                funnel_connections = participant.current_journey_step.next_connections.filter(
                     trigger_type='funnel_change',
                     funnel_step_id=funnel_step_id,
                     is_active=True
@@ -311,7 +325,7 @@ class JourneyProcessor:
         if event_type == 'manual_trigger' and 'connection_id' in data:
             connection_id = data.get('connection_id')
             if connection_id:
-                manual_connections = participant.current_step.next_connections.filter(
+                manual_connections = participant.current_journey_step.next_connections.filter(
                     id=connection_id,
                     trigger_type='manual',
                     is_active=True
@@ -355,7 +369,8 @@ class JourneyProcessor:
             participant=participant,
             journey_step=step,
             event_type=event_type,
-            metadata=metadata or {}
+            metadata=metadata or {},
+            created_by=participant.created_by
         )
 
     def _process_email_step(self, participant, step):

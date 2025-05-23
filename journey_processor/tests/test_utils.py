@@ -6,7 +6,8 @@ from django.utils import timezone
 from external_models.models import (
     Journey, JourneyStep, JourneyStepConnection,
     JourneyEvent, LeadNurturingParticipant,
-    Account, Campaign, Funnel, Lead
+    Account, Campaign, Funnel, Lead,
+    LeadNurturingCampaign
 )
 from journey_processor.services.journey_processor import JourneyProcessor
 
@@ -17,10 +18,13 @@ def create_test_journey(account, user):
     """Create a test journey with some basic steps"""
     # Find or create a test campaign and funnel
     campaign = account.campaigns.first()
-    funnel = account.funnels.first()
-
-    if not campaign or not funnel:
-        logger.error("Cannot create test journey: no campaign or funnel available")
+    if not campaign:
+        logger.error("Cannot create test journey: no campaign available")
+        return None
+        
+    funnel = campaign.funnels.first()
+    if not funnel:
+        logger.error("Cannot create test journey: no funnel available")
         return None
 
     # Create the journey
@@ -35,6 +39,19 @@ def create_test_journey(account, user):
         start_date=timezone.now()
     )
 
+    # Create the nurturing campaign
+    nurturing_campaign = LeadNurturingCampaign.objects.create(
+        account=account,
+        journey=journey,
+        name=f"Test Nurturing Campaign {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        description="Automatically created test nurturing campaign",
+        campaign_type='journey',
+        status='active',
+        active=True,
+        start_date=timezone.now(),
+        created_by=user
+    )
+
     # Create steps
     entry_step = JourneyStep.objects.create(
         journey=journey,
@@ -42,8 +59,7 @@ def create_test_journey(account, user):
         order=0,
         step_type="email",
         is_entry_point=True,
-        is_active=True,
-        position={"x": 100, "y": 100}
+        is_active=True
     )
 
     delay_step = JourneyStep.objects.create(
@@ -52,8 +68,7 @@ def create_test_journey(account, user):
         order=1,
         step_type="delay",
         is_entry_point=False,
-        is_active=True,
-        position={"x": 100, "y": 250}
+        is_active=True
     )
 
     condition_step = JourneyStep.objects.create(
@@ -68,8 +83,7 @@ def create_test_journey(account, user):
             "field": "status",
             "operator": "eq",
             "value": "active"
-        },
-        position={"x": 100, "y": 400}
+        }
     )
 
     end_step = JourneyStep.objects.create(
@@ -78,8 +92,7 @@ def create_test_journey(account, user):
         order=3,
         step_type="end",
         is_entry_point=False,
-        is_active=True,
-        position={"x": 100, "y": 550}
+        is_active=True
     )
 
     # Create connections
