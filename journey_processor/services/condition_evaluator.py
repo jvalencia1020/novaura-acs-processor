@@ -5,9 +5,12 @@ import json
 from django.db.models import Q
 from django.utils import timezone
 
-from external_models.models.journeys import JourneyStepConnection
-from external_models.models.nurturing_campaigns import LeadNurturingParticipant
-from crm.models import Lead, FunnelStep
+from external_models.models import (
+    JourneyStepConnection,
+    LeadNurturingParticipant,
+    Lead,
+    Step as FunnelStep
+)
 
 logger = logging.getLogger(__name__)
 
