@@ -45,7 +45,7 @@ resource "aws_ecs_task_definition" "bulk_campaign_scheduler_task" {
         { name = "DB_NAME", value = var.db_name },
         { name = "DB_USER", value = var.db_user },
         { name = "DB_HOST", value = var.db_host },
-        { name = "DB_PORT", value = "5432" },
+        { name = "DB_PORT", value = "3306" },
         { name = "DJANGO_SETTINGS_MODULE", value = "acs_personalization.settings.prod" }
       ]
       
@@ -94,7 +94,7 @@ resource "aws_ecs_task_definition" "journey_scheduler_task" {
         { name = "DB_NAME", value = var.db_name },
         { name = "DB_USER", value = var.db_user },
         { name = "DB_HOST", value = var.db_host },
-        { name = "DB_PORT", value = "5432" },
+        { name = "DB_PORT", value = "3306" },
         { name = "DJANGO_SETTINGS_MODULE", value = "acs_personalization.settings.prod" }
       ]
       
@@ -143,7 +143,7 @@ resource "aws_ecs_task_definition" "journey_worker_task" {
         { name = "DB_NAME", value = var.db_name },
         { name = "DB_USER", value = var.db_user },
         { name = "DB_HOST", value = var.db_host },
-        { name = "DB_PORT", value = "5432" },
+        { name = "DB_PORT", value = "3306" },
         { name = "DJANGO_SETTINGS_MODULE", value = "acs_personalization.settings.prod" }
       ]
       
@@ -192,7 +192,7 @@ resource "aws_ecs_task_definition" "bulk_campaign_worker_task" {
         { name = "DB_NAME", value = var.db_name },
         { name = "DB_USER", value = var.db_user },
         { name = "DB_HOST", value = var.db_host },
-        { name = "DB_PORT", value = "5432" },
+        { name = "DB_PORT", value = "3306" },
         { name = "DJANGO_SETTINGS_MODULE", value = "acs_personalization.settings.prod" }
       ]
       

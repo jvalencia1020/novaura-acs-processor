@@ -14,7 +14,7 @@ data "aws_subnets" "private" {
 
   filter {
     name   = "tag:Name"
-    values = ["*novaura-crm-lambda-private*"]
+    values = ["*novaura-crm-lambda-public*"]
   }
 }
 
@@ -96,6 +96,34 @@ resource "aws_vpc_endpoint" "secretsmanager" {
 
   tags = {
     Name = "novaura-acs-secretsmanager-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "rds" {
+  vpc_id             = data.aws_vpc.existing.id
+  service_name       = "com.amazonaws.us-east-1.rds"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = data.aws_subnets.private.ids
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "novaura-acs-rds-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "logs" {
+  vpc_id             = data.aws_vpc.existing.id
+  service_name       = "com.amazonaws.us-east-1.logs"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = data.aws_subnets.private.ids
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "novaura-acs-logs-endpoint"
   }
 }
 

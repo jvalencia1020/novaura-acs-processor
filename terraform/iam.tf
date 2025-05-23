@@ -41,6 +41,30 @@ resource "aws_iam_role_policy" "ecs_execution_role_secrets_policy" {
   })
 }
 
+resource "aws_iam_role_policy" "ecs_execution_role_logs_policy" {
+  name = "novaura-acs-ecs-execution-logs-policy"
+  role = aws_iam_role.ecs_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:CreateLogGroup",
+          "logs:DescribeLogStreams"
+        ]
+        Resource = [
+          "${aws_cloudwatch_log_group.processor_logs.arn}:*",
+          "${aws_cloudwatch_log_group.processor_logs.arn}:*:*"
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role" "ecs_task_role" {
   name = "novaura-acs-ecs-task-role"
 

@@ -89,4 +89,9 @@ variable "db_password_arn" {
 variable "django_secret_key_arn" {
   description = "ARN of the Django secret key in Secrets Manager"
   type        = string
+}
+
+variable "rds_security_group_id" {
+  description = "Security group ID of the RDS instance"
+  type        = string
 } 
