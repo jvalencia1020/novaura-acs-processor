@@ -3,7 +3,7 @@
 import logging
 from django.utils import timezone
 
-from acs.models import (
+from external_models.models.journeys import (
     Journey, JourneyStep, JourneyStepConnection,
     JourneyParticipant, JourneyEvent
 )
