@@ -15,6 +15,16 @@ env | while read -r line; do
 done
 echo "====================="
 
+# Check if DB_PASSWORD is set
+if [ -z "$DB_PASSWORD" ]; then
+    echo "ERROR: DB_PASSWORD is not set!"
+    echo "This could be because:"
+    echo "1. The secret ARN is incorrect"
+    echo "2. The ECS task doesn't have permission to access the secret"
+    echo "3. The secret doesn't exist in AWS Secrets Manager"
+    exit 1
+fi
+
 # Wait for the database to be ready
 echo "Waiting for database..."
 echo "📡 Attempting DB connection..."
@@ -54,10 +64,16 @@ while retry_count < max_retries:
         print(f'Using database: {os.environ.get(\"DB_NAME\")}')
         print(f'Using user: {os.environ.get(\"DB_USER\")}')
         
+        # Check if password is None or empty
+        password = os.environ.get('DB_PASSWORD')
+        if not password:
+            print('ERROR: DB_PASSWORD is None or empty!')
+            sys.exit(1)
+            
         conn = pymysql.connect(
             host=os.environ.get('DB_HOST'),
             user=os.environ.get('DB_USER'),
-            password=os.environ.get('DB_PASSWORD'),
+            password=password,
             database=os.environ.get('DB_NAME'),
             port=int(os.environ.get('DB_PORT', 3306)),
             connect_timeout=10
