@@ -50,8 +50,14 @@ resource "aws_ecs_task_definition" "bulk_campaign_scheduler_task" {
       ]
       
       secrets = [
-        { name = "DB_PASSWORD", valueFrom = var.db_password_arn },
-        { name = "DJANGO_SECRET_KEY", valueFrom = var.django_secret_key_arn }
+        { 
+          name = "DB_PASSWORD", 
+          valueFrom = "${var.db_password_arn}:DB_PASSWORD::" 
+        },
+        { 
+          name = "DJANGO_SECRET_KEY", 
+          valueFrom = "${var.django_secret_key_arn}:DJANGO_SECRET_KEY::" 
+        }
       ]
       
       logConfiguration = {
@@ -99,8 +105,14 @@ resource "aws_ecs_task_definition" "journey_scheduler_task" {
       ]
       
       secrets = [
-        { name = "DB_PASSWORD", valueFrom = var.db_password_arn },
-        { name = "DJANGO_SECRET_KEY", valueFrom = var.django_secret_key_arn }
+        { 
+          name = "DB_PASSWORD", 
+          valueFrom = "${var.db_password_arn}:DB_PASSWORD::" 
+        },
+        { 
+          name = "DJANGO_SECRET_KEY", 
+          valueFrom = "${var.django_secret_key_arn}:DJANGO_SECRET_KEY::" 
+        }
       ]
       
       logConfiguration = {
@@ -148,8 +160,14 @@ resource "aws_ecs_task_definition" "journey_worker_task" {
       ]
       
       secrets = [
-        { name = "DB_PASSWORD", valueFrom = var.db_password_arn },
-        { name = "DJANGO_SECRET_KEY", valueFrom = var.django_secret_key_arn }
+        { 
+          name = "DB_PASSWORD", 
+          valueFrom = "${var.db_password_arn}:DB_PASSWORD::" 
+        },
+        { 
+          name = "DJANGO_SECRET_KEY", 
+          valueFrom = "${var.django_secret_key_arn}:DJANGO_SECRET_KEY::" 
+        }
       ]
       
       logConfiguration = {
@@ -197,8 +215,14 @@ resource "aws_ecs_task_definition" "bulk_campaign_worker_task" {
       ]
       
       secrets = [
-        { name = "DB_PASSWORD", valueFrom = var.db_password_arn },
-        { name = "DJANGO_SECRET_KEY", valueFrom = var.django_secret_key_arn }
+        { 
+          name = "DB_PASSWORD", 
+          valueFrom = "${var.db_password_arn}:DB_PASSWORD::" 
+        },
+        { 
+          name = "DJANGO_SECRET_KEY", 
+          valueFrom = "${var.django_secret_key_arn}:DJANGO_SECRET_KEY::" 
+        }
       ]
       
       logConfiguration = {
