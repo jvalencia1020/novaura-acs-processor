@@ -99,6 +99,7 @@ jobs:
           TF_VAR_django_secret_key_arn: ${{ secrets.DJANGO_SECRET_KEY_ARN }}
           TF_VAR_private_subnet_ids: ${{ secrets.PRIVATE_SUBNET_IDS }}
           TF_VAR_vpc_id: ${{ secrets.VPC_ID }}
+          TF_VAR_rds_security_group_id: ${{ secrets.RDS_SECURITY_GROUP_ID }}
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
