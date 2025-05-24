@@ -3,6 +3,18 @@ set -e
 
 echo "docker-entrypoint.sh started..."
 
+# Print all environment variables (masking sensitive ones)
+echo "Environment variables:"
+echo "====================="
+env | while read -r line; do
+    if [[ $line == *"PASSWORD"* ]] || [[ $line == *"SECRET"* ]]; then
+        echo "${line%%=*}=[MASKED]"
+    else
+        echo "$line"
+    fi
+done
+echo "====================="
+
 # Wait for the database to be ready
 echo "Waiting for database..."
 echo "📡 Attempting DB connection..."
@@ -11,27 +23,50 @@ echo "  DB_PORT: ${DB_PORT:-3306}"
 echo "  DB_NAME: $DB_NAME"
 echo "  DB_USER: $DB_USER"
 echo "  DB_PASSWORD: [MASKED]"
+echo "  DB_ENGINE: ${DB_ENGINE:-django.db.backends.mysql}"
 
 python -c "
 import sys
 import time
 import pymysql
 import os
+import socket
+
+def get_connection_info():
+    try:
+        # Get local IP address
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception as e:
+        return f'Could not determine IP: {str(e)}'
 
 max_retries = 30
 retry_count = 0
 
 while retry_count < max_retries:
     try:
+        local_ip = get_connection_info()
+        print(f'Connection attempt from IP: {local_ip}')
         print(f'Attempting to connect to database at {os.environ.get(\"DB_HOST\")}...')
+        print(f'Using database: {os.environ.get(\"DB_NAME\")}')
+        print(f'Using user: {os.environ.get(\"DB_USER\")}')
+        
         conn = pymysql.connect(
             host=os.environ.get('DB_HOST'),
             user=os.environ.get('DB_USER'),
             password=os.environ.get('DB_PASSWORD'),
             database=os.environ.get('DB_NAME'),
-            port=int(os.environ.get('DB_PORT', 3306))
+            port=int(os.environ.get('DB_PORT', 3306)),
+            connect_timeout=10
         )
         print('Successfully connected to database!')
+        print('Connection details:')
+        print(f'  Server version: {conn.get_server_info()}')
+        print(f'  Connection ID: {conn.thread_id()}')
+        print(f'  Character set: {conn.character_set_name()}')
         conn.close()
         break
     except pymysql.OperationalError as e:
@@ -39,7 +74,14 @@ while retry_count < max_retries:
         error_msg = str(e)
         print('=' * 50)
         print(f'Database connection failed (attempt {retry_count}/{max_retries})')
-        print(f'Error: {error_msg}')
+        print(f'Error code: {e.args[0]}')
+        print(f'Error message: {error_msg}')
+        print(f'Connection details:')
+        print(f'  Host: {os.environ.get(\"DB_HOST\")}')
+        print(f'  Port: {os.environ.get(\"DB_PORT\", \"3306\")}')
+        print(f'  Database: {os.environ.get(\"DB_NAME\")}')
+        print(f'  User: {os.environ.get(\"DB_USER\")}')
+        print(f'  Local IP: {local_ip}')
         print('=' * 50)
         if retry_count == max_retries:
             print('Max retries reached. Exiting...')
