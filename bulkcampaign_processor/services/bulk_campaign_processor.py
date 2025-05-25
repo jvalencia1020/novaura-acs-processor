@@ -158,10 +158,10 @@ class BulkCampaignProcessor:
             return 0
 
         schedule = campaign.blast_schedule
-        now = timezone.now()
+        now_utc = timezone.now().astimezone(timezone.UTC)
 
         # Check if it's time to send the blast
-        if schedule.send_time > now:
+        if schedule.send_time > now_utc:
             return 0
 
         # Find active participants that haven't received the blast
