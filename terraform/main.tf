@@ -94,4 +94,9 @@ variable "django_secret_key_arn" {
 variable "rds_security_group_id" {
   description = "Security group ID of the RDS instance"
   type        = string
+}
+
+variable "twilio_credentials_arn" {
+  description = "ARN of the Secrets Manager secret containing Twilio credentials"
+  type        = string
 } 
