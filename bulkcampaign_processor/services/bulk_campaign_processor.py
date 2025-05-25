@@ -158,7 +158,7 @@ class BulkCampaignProcessor:
             return 0
 
         schedule = campaign.blast_schedule
-        now_utc = timezone.now().astimezone(timezone.UTC)
+        now_utc = timezone.now().astimezone(timezone.utc)
 
         # Check if it's time to send the blast
         if schedule.send_time > now_utc:

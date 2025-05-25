@@ -37,7 +37,7 @@ resource "aws_ecs_task_definition" "bulk_campaign_scheduler_task" {
       name      = "bulk-campaign-scheduler"
       image     = "${data.aws_ecr_repository.processor_repository.repository_url}:latest"
       essential = true
-      command   = ["python", "manage.py", "run_bulk_campaign_processor"]
+      command   = ["python", "manage.py", "process_bulk_campaigns"]
       
       environment = [
         { name = "SERVICE_TYPE", value = "bulk_campaign_scheduler" },
@@ -247,7 +247,7 @@ resource "aws_ecs_service" "bulk_campaign_scheduler_service" {
   name            = "novaura-acs-bulk-campaign-scheduler"
   cluster         = aws_ecs_cluster.processor_cluster.id
   task_definition = aws_ecs_task_definition.bulk_campaign_scheduler_task.arn
-  desired_count   = 0
+  desired_count   = 1
   launch_type     = "FARGATE"
   
   network_configuration {
@@ -265,7 +265,7 @@ resource "aws_ecs_service" "journey_scheduler_service" {
   name            = "novaura-acs-journey-scheduler"
   cluster         = aws_ecs_cluster.processor_cluster.id
   task_definition = aws_ecs_task_definition.journey_scheduler_task.arn
-  desired_count   = 0
+  desired_count   = 1
   launch_type     = "FARGATE"
   
   network_configuration {
@@ -287,8 +287,9 @@ resource "aws_ecs_service" "journey_worker_service" {
   launch_type     = "FARGATE"
   
   network_configuration {
-    subnets          = local.private_subnet_ids
-    security_groups = [aws_security_group.ecs_service.id]
+    subnets          = concat(data.aws_subnets.private.ids, data.aws_subnets.public.ids)
+    security_groups  = [aws_security_group.ecs_service.id]
+    assign_public_ip = false
   }
   
   tags = {
@@ -305,8 +306,9 @@ resource "aws_ecs_service" "bulk_campaign_worker_service" {
   launch_type     = "FARGATE"
   
   network_configuration {
-    subnets          = local.private_subnet_ids
-    security_groups = [aws_security_group.ecs_service.id]
+    subnets          = concat(data.aws_subnets.private.ids, data.aws_subnets.public.ids)
+    security_groups  = [aws_security_group.ecs_service.id]
+    assign_public_ip = false
   }
   
   tags = {

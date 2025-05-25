@@ -4,7 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="" />
+    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/ecs.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/ecs.tf" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -32,7 +35,7 @@
     &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
 }</component>
-  <component name="RunManager" selected="Python.process_due_messages">
+  <component name="RunManager" selected="Python.process_bulk_campaigns">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
