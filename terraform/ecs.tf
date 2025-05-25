@@ -167,6 +167,14 @@ resource "aws_ecs_task_definition" "journey_worker_task" {
         { 
           name = "DJANGO_SECRET_KEY", 
           valueFrom = "${var.django_secret_key_arn}:DJANGO_SECRET_KEY::" 
+        },
+        {
+          name = "TWILIO_ACCOUNT_SID",
+          valueFrom = "${var.twilio_credentials_arn}:TWILIO_ACCOUNT_SID::"
+        },
+        {
+          name = "TWILIO_AUTH_TOKEN",
+          valueFrom = "${var.twilio_credentials_arn}:TWILIO_AUTH_TOKEN::"
         }
       ]
       
@@ -222,6 +230,14 @@ resource "aws_ecs_task_definition" "bulk_campaign_worker_task" {
         { 
           name = "DJANGO_SECRET_KEY", 
           valueFrom = "${var.django_secret_key_arn}:DJANGO_SECRET_KEY::" 
+        },
+        {
+          name = "TWILIO_ACCOUNT_SID",
+          valueFrom = "${var.twilio_credentials_arn}:TWILIO_ACCOUNT_SID::"
+        },
+        {
+          name = "TWILIO_AUTH_TOKEN",
+          valueFrom = "${var.twilio_credentials_arn}:TWILIO_AUTH_TOKEN::"
         }
       ]
       
