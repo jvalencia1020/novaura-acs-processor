@@ -55,7 +55,13 @@ variable "worker_memory" {
   default     = 512
 }
 
-variable "worker_count" {
+variable "journey_worker_count" {
+  description = "Number of worker tasks"
+  type        = number
+  default     = 2
+}
+
+variable "bulk_worker_count" {
   description = "Number of worker tasks"
   type        = number
   default     = 2

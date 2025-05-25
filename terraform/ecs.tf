@@ -263,7 +263,7 @@ resource "aws_ecs_service" "bulk_campaign_scheduler_service" {
   name            = "novaura-acs-bulk-campaign-scheduler"
   cluster         = aws_ecs_cluster.processor_cluster.id
   task_definition = aws_ecs_task_definition.bulk_campaign_scheduler_task.arn
-  desired_count   = 1
+  desired_count   = var.bulk_worker_count
   launch_type     = "FARGATE"
   
   network_configuration {
@@ -281,7 +281,7 @@ resource "aws_ecs_service" "journey_scheduler_service" {
   name            = "novaura-acs-journey-scheduler"
   cluster         = aws_ecs_cluster.processor_cluster.id
   task_definition = aws_ecs_task_definition.journey_scheduler_task.arn
-  desired_count   = 1
+  desired_count   = var.bulk_worker_count
   launch_type     = "FARGATE"
   
   network_configuration {
@@ -299,7 +299,7 @@ resource "aws_ecs_service" "journey_worker_service" {
   name            = "novaura-acs-journey-worker"
   cluster         = aws_ecs_cluster.processor_cluster.id
   task_definition = aws_ecs_task_definition.journey_worker_task.arn
-  desired_count   = var.worker_count
+  desired_count   = var.journey_worker_count
   launch_type     = "FARGATE"
   
   network_configuration {
@@ -318,7 +318,7 @@ resource "aws_ecs_service" "bulk_campaign_worker_service" {
   name            = "novaura-acs-bulk-campaign-worker"
   cluster         = aws_ecs_cluster.processor_cluster.id
   task_definition = aws_ecs_task_definition.bulk_campaign_worker_task.arn
-  desired_count   = var.worker_count
+  desired_count   = var.journey_worker_count
   launch_type     = "FARGATE"
   
   network_configuration {
