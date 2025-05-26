@@ -3,6 +3,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q
 from twilio.rest import Client
+import pytz
 
 from external_models.models.nurturing_campaigns import (
     LeadNurturingCampaign,
@@ -158,7 +159,7 @@ class BulkCampaignProcessor:
             return 0
 
         schedule = campaign.blast_schedule
-        now_utc = timezone.now().astimezone(timezone.utc)
+        now_utc = timezone.now().astimezone(pytz.UTC)
 
         # Check if it's time to send the blast
         if schedule.send_time > now_utc:
@@ -368,12 +369,33 @@ class BulkCampaignProcessor:
             participant = message.participant
             lead = participant.lead
 
+            # Prepare context for variable replacement
+            context = {
+                'lead': {
+                    'first_name': lead.first_name,
+                    'last_name': lead.last_name,
+                    'email': lead.email,
+                    'phone_number': lead.phone_number,
+                    'company': lead.company_name if hasattr(lead, 'company_name') else None,
+                    'title': lead.title if hasattr(lead, 'title') else None,
+                },
+                'campaign': {
+                    'name': campaign.name,
+                    'type': campaign.campaign_type,
+                    'channel': campaign.channel,
+                }
+            }
+
+            # Replace variables in content
+            processed_content = campaign.replace_variables(context)
+            processed_subject = campaign.subject.replace_variables(context) if hasattr(campaign, 'subject') else None
+
             # Create thread for tracking
             thread = ConversationThread.objects.create(
                 lead=lead,
                 channel='email',
                 status='open',
-                subject=message.subject if hasattr(message, 'subject') else None,
+                subject=processed_subject,
                 last_message_timestamp=timezone.now()
             )
 
@@ -381,7 +403,7 @@ class BulkCampaignProcessor:
             thread_message = ThreadMessage.objects.create(
                 thread=thread,
                 sender_type='user',
-                content=message.content,
+                content=processed_content,
                 channel='email',
                 lead=lead,
                 user=campaign.created_by
@@ -408,6 +430,26 @@ class BulkCampaignProcessor:
             participant = message.participant
             lead = participant.lead
 
+            # Prepare context for variable replacement
+            context = {
+                'lead': {
+                    'first_name': lead.first_name,
+                    'last_name': lead.last_name,
+                    'email': lead.email,
+                    'phone_number': lead.phone_number,
+                    'company': lead.company_name if hasattr(lead, 'company_name') else None,
+                    'title': lead.title if hasattr(lead, 'title') else None,
+                },
+                'campaign': {
+                    'name': campaign.name,
+                    'type': campaign.campaign_type,
+                    'channel': campaign.channel,
+                }
+            }
+
+            # Replace variables in content
+            processed_content = campaign.replace_variables(context)
+
             # Get the service phone number
             service_phone = None
             if message.campaign.config and message.campaign.config.get('from_number'):
@@ -430,7 +472,7 @@ class BulkCampaignProcessor:
 
             # Send message directly
             twilio_message = client.messages.create(
-                body=message.campaign.content,
+                body=processed_content,
                 from_=formatted_from,
                 to=formatted_to
             )
@@ -447,7 +489,7 @@ class BulkCampaignProcessor:
             ThreadMessage.objects.create(
                 thread=thread,
                 sender_type='user',
-                content=message.campaign.content,
+                content=processed_content,
                 channel='sms',
                 lead=lead,
                 user=campaign.created_by
@@ -467,6 +509,26 @@ class BulkCampaignProcessor:
             participant = message.participant
             lead = participant.lead
 
+            # Prepare context for variable replacement
+            context = {
+                'lead': {
+                    'first_name': lead.first_name,
+                    'last_name': lead.last_name,
+                    'email': lead.email,
+                    'phone_number': lead.phone_number,
+                    'company': lead.company_name if hasattr(lead, 'company_name') else None,
+                    'title': lead.title if hasattr(lead, 'title') else None,
+                },
+                'campaign': {
+                    'name': campaign.name,
+                    'type': campaign.campaign_type,
+                    'channel': campaign.channel,
+                }
+            }
+
+            # Replace variables in content
+            processed_content = campaign.replace_variables(context)
+
             # Create thread for tracking
             thread = ConversationThread.objects.create(
                 lead=lead,
@@ -479,7 +541,7 @@ class BulkCampaignProcessor:
             thread_message = ThreadMessage.objects.create(
                 thread=thread,
                 sender_type='user',
-                content=message.content,
+                content=processed_content,
                 channel='voice',
                 lead=lead,
                 user=campaign.created_by
@@ -509,6 +571,26 @@ class BulkCampaignProcessor:
             participant = message.participant
             lead = participant.lead
 
+            # Prepare context for variable replacement
+            context = {
+                'lead': {
+                    'first_name': lead.first_name,
+                    'last_name': lead.last_name,
+                    'email': lead.email,
+                    'phone_number': lead.phone_number,
+                    'company': lead.company_name if hasattr(lead, 'company_name') else None,
+                    'title': lead.title if hasattr(lead, 'title') else None,
+                },
+                'campaign': {
+                    'name': campaign.name,
+                    'type': campaign.campaign_type,
+                    'channel': campaign.channel,
+                }
+            }
+
+            # Replace variables in content
+            processed_content = campaign.replace_variables(context)
+
             # Create thread for tracking
             thread = ConversationThread.objects.create(
                 lead=lead,
@@ -521,7 +603,7 @@ class BulkCampaignProcessor:
             thread_message = ThreadMessage.objects.create(
                 thread=thread,
                 sender_type='user',
-                content=message.content,
+                content=processed_content,
                 channel='chat',
                 lead=lead,
                 user=campaign.created_by

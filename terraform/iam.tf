@@ -114,4 +114,44 @@ resource "aws_iam_role_policy" "ecs_task_role_policy" {
       }
     ]
   })
+}
+
+resource "aws_iam_role_policy" "ecs_execution_policy" {
+  name = "novaura-acs-ecs-execution-policy"
+  role = aws_iam_role.ecs_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          var.db_password_arn,
+          var.django_secret_key_arn,
+          var.twilio_credentials_arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "${aws_cloudwatch_log_group.processor_logs.arn}:*"
+      }
+    ]
+  })
 } 

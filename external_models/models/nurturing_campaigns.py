@@ -174,6 +174,58 @@ class LeadNurturingCampaign(models.Model):
 
         return True
 
+    def replace_variables(self, context):
+        """
+        Replaces variables in the campaign content with values from the context.
+        
+        Args:
+            context (dict): Dictionary containing values for variables.
+                           Should be structured as: {'lead': {...}, 'campaign': {...}, etc.}
+        
+        Returns:
+            str: Content with variables replaced with their values
+        """
+        # If using a template, use its replace_variables method
+        if self.template:
+            return self.template.replace_variables(context)
+            
+        # If using direct content, process it here
+        if not self.content:
+            return ""
+            
+        content = self.content
+        
+        # Get all active variables
+        from external_models.models.messages import TemplateVariable
+        variables = TemplateVariable.objects.filter(
+            category__is_active=True,
+            is_active=True
+        ).select_related('category')
+        
+        # Replace each variable
+        for var in variables:
+            placeholder = var.get_placeholder()
+            if placeholder in content:
+                category = var.category.name
+                if category == 'system':
+                    # Handle system variables
+                    if var.name == 'current_date':
+                        value = timezone.now().strftime('%Y-%m-%d')
+                    elif var.name == 'current_time':
+                        value = timezone.now().strftime('%I:%M %p')
+                else:
+                    # Get value from context using the model and field information
+                    model_data = context.get(category, {})
+                    if isinstance(model_data, dict):
+                        value = model_data.get(var.name, '')
+                    else:
+                        # If model_data is an actual model instance
+                        value = getattr(model_data, var.field_name, '')
+                
+                content = content.replace(placeholder, str(value))
+        
+        return content
+
 class CampaignScheduleBase(models.Model):
     """Base model for campaign scheduling"""
     business_hours_only = models.BooleanField(default=False)
