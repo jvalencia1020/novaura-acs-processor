@@ -4,15 +4,31 @@ from django.db import transaction
 from django.db.models import Q
 from twilio.rest import Client
 import pytz
+from datetime import timedelta
 
 from external_models.models.nurturing_campaigns import (
     LeadNurturingCampaign,
     LeadNurturingParticipant,
     BulkCampaignMessage,
-    DripCampaignSchedule,
+)
+
+from external_models.models.drip_campaigns import (
+    DripCampaignMessageStep,
+    DripCampaignProgress,
+    DripCampaignSchedule
+)
+
+from external_models.models.reminder_campaigns import (
+    ReminderCampaignProgress,
     ReminderCampaignSchedule,
+    ReminderTime
+)
+
+from external_models.models.blast_campaigns import (
+    BlastCampaignProgress,
     BlastCampaignSchedule
 )
+
 from external_models.models.communications import (
     Conversation,
     Participant,
@@ -20,6 +36,7 @@ from external_models.models.communications import (
     ConversationThread,
     ThreadMessage
 )
+
 from django.conf import settings
 import time
 
@@ -106,21 +123,50 @@ class BulkCampaignProcessor:
             status='active'
         ).select_related('lead')
 
+        logger.info(f"Processing drip campaign {campaign.id} with {participants.count()} active participants")
         scheduled_count = 0
 
         for participant in participants:
-            # Check if participant has reached max messages
-            if participant.messages_sent_count >= schedule.max_messages:
+            try:
+                # Get or create progress
+                progress = participant.drip_campaign_progress.first()
+                
+                # If no progress exists, we should start with the first step
+                if not progress:
+                    first_step = schedule.message_steps.order_by('order').first()
+                    if not first_step:
+                        logger.error(f"No message steps found for drip schedule {schedule.id}")
+                        continue
+                    
+                    progress = DripCampaignProgress.objects.create(
+                        participant=participant,
+                        current_step=first_step,
+                        next_scheduled_interval=now
+                    )
+                
+                # If no current step, we're done with the sequence
+                if not progress.current_step:
+                    logger.debug(f"Participant {participant.id} has completed all steps")
+                    continue
+                
+                # Check if it's time for next message
+                if not self._should_send_drip_message(participant, schedule):
+                    logger.debug(f"Not time to send message for participant {participant.id}")
+                    continue
+
+                # Schedule next message
+                logger.info(f"Attempting to schedule message for participant {participant.id} at step {progress.current_step.order}")
+                if self._schedule_drip_message(participant, schedule):
+                    scheduled_count += 1
+                    logger.info(f"Successfully scheduled message for participant {participant.id}")
+                else:
+                    logger.error(f"Failed to schedule message for participant {participant.id}")
+
+            except Exception as e:
+                logger.exception(f"Error processing participant {participant.id}: {e}")
                 continue
 
-            # Check if it's time for next message
-            if not self._should_send_drip_message(participant, schedule):
-                continue
-
-            # Schedule next message
-            if self._schedule_drip_message(participant, schedule):
-                scheduled_count += 1
-
+        logger.info(f"Scheduled {scheduled_count} messages for campaign {campaign.id}")
         return scheduled_count
 
     def _process_reminder_campaign(self, campaign):
@@ -184,29 +230,71 @@ class BulkCampaignProcessor:
 
     def _should_send_drip_message(self, participant, schedule):
         """Check if a drip message should be sent to participant"""
-        if not participant.last_message_sent_at:
+        # Get the participant's progress
+        progress = participant.drip_campaign_progress.first()
+        
+        # If no progress exists, we should send the first message
+        if not progress:
             return True
-
-        # Check if enough time has passed since last message
-        interval = schedule.interval * 3600  # Convert hours to seconds
-        elapsed = timezone.now() - participant.last_message_sent_at
-        return elapsed.total_seconds() >= interval
+        
+        # If no current step, we're done with the sequence
+        if not progress.current_step:
+            return False
+        
+        # Check if we have a next scheduled interval
+        if not progress.next_scheduled_interval:
+            return True
+        
+        # Check if it's time for the next message
+        now = timezone.now()
+        if now < progress.next_scheduled_interval:
+            return False
+        
+        # Check business hours if enabled
+        if schedule.business_hours_only:
+            current_time = now.time()
+            if current_time < schedule.start_time or current_time > schedule.end_time:
+                return False
+        
+        # Check weekends if excluded
+        if schedule.exclude_weekends and now.weekday() >= 5:
+            return False
+        
+        return True
 
     def _get_next_reminder_time(self, participant, schedule):
         """Get the next reminder time for a participant"""
-        # Get all reminder times
+        # Get all reminder times ordered appropriately
         reminder_times = schedule.reminder_times.all().order_by(
             'days_before', 'days_before_relative', 'hours_before', 'minutes_before'
         )
 
-        # Find the first reminder that hasn't been sent
-        sent_days = set(
-            participant.reminder_campaign_progress.values_list('days_before', flat=True)
-        )
+        if schedule.use_relative_schedule:
+            # For relative scheduling, we need the appointment time
+            appointment_time = participant.lead.appointment_time
+            if not appointment_time:
+                logger.warning(f"No appointment time found for participant {participant.id}")
+                return None
 
-        for reminder in reminder_times:
-            if reminder.days_before not in sent_days:
-                return reminder
+            # Find the first reminder that hasn't been sent
+            sent_minutes = set(
+                participant.reminder_campaign_progress.values_list('minutes_before', flat=True)
+            )
+
+            for reminder in reminder_times:
+                total_minutes = reminder.get_total_minutes_before()
+                if total_minutes not in sent_minutes:
+                    return reminder
+
+        else:
+            # For absolute scheduling
+            sent_days = set(
+                participant.reminder_campaign_progress.values_list('days_before', flat=True)
+            )
+
+            for reminder in reminder_times:
+                if reminder.days_before not in sent_days:
+                    return reminder
 
         return None
 
@@ -214,22 +302,83 @@ class BulkCampaignProcessor:
         """Schedule a drip campaign message"""
         try:
             with transaction.atomic():
+                # Get or create progress
+                progress = participant.drip_campaign_progress.first()
+                if not progress:
+                    # Start with the first step
+                    first_step = schedule.message_steps.order_by('order').first()
+                    if not first_step:
+                        logger.error(f"No message steps found for drip schedule {schedule.id}")
+                        return False
+                    
+                    progress = DripCampaignProgress.objects.create(
+                        participant=participant,
+                        current_step=first_step,
+                        next_scheduled_interval=timezone.now()
+                    )
+                
+                # Get the current step
+                current_step = progress.current_step
+                if not current_step:
+                    logger.debug(f"Participant {participant.id} has no current step")
+                    return False
+                
+                # Calculate next send time
+                now = timezone.now()
+                next_time = now + current_step.get_delay_timedelta()
+                
+                # Apply business hours restrictions
+                if schedule.business_hours_only:
+                    if next_time.time() < schedule.start_time:
+                        next_time = timezone.make_aware(
+                            timezone.datetime.combine(next_time.date(), schedule.start_time)
+                        )
+                    elif next_time.time() > schedule.end_time:
+                        next_time = timezone.make_aware(
+                            timezone.datetime.combine(next_time.date() + timedelta(days=1), schedule.start_time)
+                        )
+                
+                # Apply weekend restrictions
+                if schedule.exclude_weekends:
+                    while next_time.weekday() >= 5:
+                        next_time += timedelta(days=1)
+                
+                # Update progress with next interval
+                progress.next_scheduled_interval = next_time
+                progress.save()
+                
+                # Validate message step has content
+                if not current_step.template and not current_step.content:
+                    logger.error(f"Message step {current_step.id} has no content or template")
+                    return False
+
                 # Create message
-                message = BulkCampaignMessage.objects.create(
-                    campaign=participant.nurturing_campaign,
-                    participant=participant,
-                    status='scheduled',
-                    scheduled_for=self._get_next_send_time(schedule)
-                )
-
+                try:
+                    message = BulkCampaignMessage.objects.create(
+                        campaign=participant.nurturing_campaign,
+                        participant=participant,
+                        status='scheduled',
+                        scheduled_for=next_time,
+                        drip_message_step=current_step,
+                        step_order=current_step.order
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create message for participant {participant.id}: {str(e)}")
+                    return False
+                
                 # Update participant progress
-                participant.update_campaign_progress(
-                    scheduled_time=message.scheduled_for
-                )
-
+                try:
+                    participant.update_campaign_progress(
+                        scheduled_time=next_time
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update participant progress for {participant.id}: {str(e)}")
+                    return False
+                
                 return True
+                
         except Exception as e:
-            logger.exception(f"Error scheduling drip message: {e}")
+            logger.exception(f"Error scheduling drip message for participant {participant.id}: {str(e)}")
             return False
 
     def _schedule_reminder_message(self, participant, reminder):
@@ -237,7 +386,7 @@ class BulkCampaignProcessor:
         try:
             with transaction.atomic():
                 # Calculate send time based on reminder settings
-                send_time = self._calculate_reminder_time(reminder)
+                send_time = self._calculate_reminder_time(reminder, participant)
 
                 # Create message
                 message = BulkCampaignMessage.objects.create(
@@ -246,6 +395,21 @@ class BulkCampaignProcessor:
                     status='scheduled',
                     scheduled_for=send_time
                 )
+
+                # Create progress record
+                if reminder.schedule.use_relative_schedule:
+                    minutes_before = reminder.get_total_minutes_before()
+                    ReminderCampaignProgress.objects.create(
+                        participant=participant,
+                        minutes_before=minutes_before,
+                        sent_at=send_time
+                    )
+                else:
+                    ReminderCampaignProgress.objects.create(
+                        participant=participant,
+                        days_before=reminder.days_before,
+                        sent_at=send_time
+                    )
 
                 # Update participant progress
                 participant.update_campaign_progress(
@@ -311,6 +475,21 @@ class BulkCampaignProcessor:
                 # Update participant progress
                 participant.update_campaign_progress(message_sent=True)
 
+                # For drip campaigns, update the current step if this was the last message in the sequence
+                if campaign.campaign_type == 'drip' and message.drip_message_step:
+                    progress = participant.drip_campaign_progress.first()
+                    if progress and progress.current_step == message.drip_message_step:
+                        # Find next step
+                        next_step = campaign.drip_schedule.message_steps.filter(
+                            order__gt=message.drip_message_step.order
+                        ).order_by('order').first()
+                        
+                        if next_step:
+                            progress.current_step = next_step
+                        else:
+                            progress.current_step = None
+                        progress.save()
+
                 return True
 
             return False
@@ -339,27 +518,34 @@ class BulkCampaignProcessor:
 
         return now
 
-    def _calculate_reminder_time(self, reminder):
+    def _calculate_reminder_time(self, reminder, participant=None):
         """Calculate the send time for a reminder"""
         now = timezone.now()
 
-        if reminder.days_before is not None:
-            # Absolute scheduling
-            send_date = now.date() + timezone.timedelta(days=reminder.days_before)
-            if reminder.time:
-                return timezone.make_aware(timezone.datetime.combine(send_date, reminder.time))
-            return timezone.make_aware(timezone.datetime.combine(send_date, time(9, 0)))  # Default to 9 AM
-        else:
-            # Relative scheduling
-            total_seconds = 0
-            if reminder.days_before_relative:
-                total_seconds += reminder.days_before_relative * 86400
-            if reminder.hours_before:
-                total_seconds += reminder.hours_before * 3600
-            if reminder.minutes_before:
-                total_seconds += reminder.minutes_before * 60
+        if reminder.schedule.use_relative_schedule:
+            if not participant or not participant.lead.appointment_time:
+                raise ValueError("Appointment time required for relative scheduling")
 
-            return now + timezone.timedelta(seconds=total_seconds)
+            appointment_time = participant.lead.appointment_time
+            total_minutes = reminder.get_total_minutes_before()
+            
+            # Calculate time before appointment
+            send_time = appointment_time - timezone.timedelta(minutes=total_minutes)
+            
+            # If the calculated time is in the past, return None
+            if send_time <= now:
+                return None
+                
+            return send_time
+        else:
+            # Absolute scheduling
+            if reminder.days_before is not None:
+                send_date = now.date() + timezone.timedelta(days=reminder.days_before)
+                if reminder.time:
+                    return timezone.make_aware(timezone.datetime.combine(send_date, reminder.time))
+                return timezone.make_aware(timezone.datetime.combine(send_date, time(9, 0)))  # Default to 9 AM
+
+        return None
 
     def _send_email(self, message):
         """Send an email message using the configured email service"""
@@ -386,8 +572,8 @@ class BulkCampaignProcessor:
                 }
             }
 
-            # Replace variables in content
-            processed_content = campaign.replace_variables(context)
+            # Get message content using the appropriate source
+            processed_content = message.get_message_content()
             processed_subject = campaign.subject.replace_variables(context) if hasattr(campaign, 'subject') else None
 
             # Create thread for tracking
@@ -447,8 +633,8 @@ class BulkCampaignProcessor:
                 }
             }
 
-            # Replace variables in content
-            processed_content = campaign.replace_variables(context)
+            # Get message content using the appropriate source
+            processed_content = message.get_message_content()
 
             # Get the service phone number
             service_phone = None
@@ -526,8 +712,8 @@ class BulkCampaignProcessor:
                 }
             }
 
-            # Replace variables in content
-            processed_content = campaign.replace_variables(context)
+            # Get message content using the appropriate source
+            processed_content = message.get_message_content()
 
             # Create thread for tracking
             thread = ConversationThread.objects.create(
@@ -588,8 +774,8 @@ class BulkCampaignProcessor:
                 }
             }
 
-            # Replace variables in content
-            processed_content = campaign.replace_variables(context)
+            # Get message content using the appropriate source
+            processed_content = message.get_message_content()
 
             # Create thread for tracking
             thread = ConversationThread.objects.create(

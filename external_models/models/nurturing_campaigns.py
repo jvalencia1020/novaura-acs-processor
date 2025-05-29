@@ -6,6 +6,10 @@ import pytz
 from datetime import datetime, timedelta
 from .external_references import Account, Campaign, Lead
 from .journeys import JourneyEvent
+from .blast_campaigns import BlastCampaignProgress
+from .drip_campaigns import DripCampaignProgress
+from .reminder_campaigns import ReminderCampaignProgress
+from bulkcampaign_processor.utils.variable_replacement import replace_variables
 
 class LeadNurturingCampaign(models.Model):
     CAMPAIGN_TYPES = [
@@ -67,13 +71,75 @@ class LeadNurturingCampaign(models.Model):
     auto_enroll_filters = models.JSONField(
         blank=True, 
         null=True,
-        help_text="Filters to determine which new leads should be auto-enrolled"
+        help_text="""
+        Filters to determine which new leads should be auto-enrolled.
+        Format: [
+            {
+                "model": "lead|d2c_lead|b2b_lead|lead_field_value|lead_intake_value",
+                "field": "field_name",
+                "operator": "equals|contains|greater_than|less_than|is_empty|is_not_empty",
+                "value": "value_to_compare"
+            }
+        ]
+        """
     )
     
     config = models.JSONField(
         blank=True, 
         null=True,
-        help_text="Additional configuration for the campaign"
+        help_text="""
+        Additional configuration for the campaign:
+        - For all campaigns: {
+            "track_opens": true,
+            "track_clicks": true,
+            "track_replies": true,
+            "track_delivery": true,
+            "allow_opt_out": true,
+            "opt_out_message": "Reply STOP to unsubscribe"
+          }
+        - For email campaigns: {
+            "from_email": "sender@example.com",
+            "from_name": "Sender Name",
+            "reply_to": "reply@example.com",
+            "priority": "high|normal|low",
+            "attachments": [
+                {
+                    "name": "file.pdf",
+                    "url": "https://..."
+                }
+            ]
+          }
+        - For SMS campaigns: {
+            "from_number": "+1234567890",
+            "priority": "high|normal|low",
+            "media_urls": ["https://..."]
+          }
+        - For voice campaigns: {
+            "from_number": "+1234567890",
+            "voice": "male|female",
+            "language": "en-US",
+            "retry_attempts": 3,
+            "retry_delay": 300,
+            "record_call": true,
+            "call_timeout": 60,
+            "machine_detection": "true|false|prefer_human"
+          }
+        - For chat campaigns: {
+            "platform": "whatsapp|messenger|telegram",
+            "priority": "high|normal|low",
+            "media_urls": ["https://..."],
+            "quick_replies": [
+                {
+                    "text": "Yes",
+                    "value": "yes"
+                },
+                {
+                    "text": "No",
+                    "value": "no"
+                }
+            ]
+          }
+        """
     )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -110,6 +176,7 @@ class LeadNurturingCampaign(models.Model):
         """Validate campaign configuration"""
         super().clean()
         
+        # Validate end date only if not an ongoing campaign
         if not self.is_ongoing and self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValidationError("End date must be after start date")
 
@@ -123,10 +190,17 @@ class LeadNurturingCampaign(models.Model):
                 raise ValidationError("Either template or content is required for bulk campaigns")
 
     def update_status(self, new_status, user):
-        """Update the campaign status with proper tracking"""
+        """
+        Update the campaign status with proper tracking
+
+        Args:
+            new_status (str): New status from CAMPAIGN_STATUS_CHOICES
+            user: User making the status change
+        """
         if new_status not in dict(self.CAMPAIGN_STATUS_CHOICES):
             raise ValueError(f"Invalid status: {new_status}")
 
+        # If completing or cancelling an ongoing campaign, update is_ongoing
         if new_status in ['completed', 'cancelled']:
             self.is_ongoing = False
             if not self.end_date:
@@ -147,9 +221,11 @@ class LeadNurturingCampaign(models.Model):
 
         now = timezone.now()
         
+        # Check start date
         if self.start_date and self.start_date > now:
             return False
 
+        # Check end date only if not ongoing
         if not self.is_ongoing and self.end_date and self.end_date < now:
             return False
 
@@ -160,12 +236,15 @@ class LeadNurturingCampaign(models.Model):
         if not self.is_active_or_scheduled():
             return False
 
+        # Check participant status
         if participant.status not in ['active']:
             return False
 
+        # For ongoing campaigns, we only need to check the start date
         if self.is_ongoing:
             return not self.start_date or self.start_date <= timezone.now()
 
+        # For campaigns with end dates, check both start and end
         now = timezone.now()
         if self.start_date and self.start_date > now:
             return False
@@ -173,6 +252,114 @@ class LeadNurturingCampaign(models.Model):
             return False
 
         return True
+
+    def get_next_send_time(self, last_send_time=None):
+        """Calculate the next send time based on campaign type and settings"""
+        # First check if campaign is active/scheduled
+        if not self.is_active_or_scheduled():
+            return None
+
+        if self.campaign_type == 'drip':
+            return self._get_drip_next_send_time(last_send_time)
+        elif self.campaign_type == 'reminder':
+            return self._get_reminder_next_send_time(last_send_time)
+        elif self.campaign_type == 'blast':
+            return self._get_blast_next_send_time()
+        return None
+
+    def _get_drip_next_send_time(self, last_send_time=None):
+        """Calculate next send time for drip campaigns"""
+        if not hasattr(self, 'drip_schedule'):
+            return None
+
+        now = timezone.now()
+        tz = pytz.timezone(self.crm_campaign.timezone) if self.crm_campaign else pytz.UTC
+        now = now.astimezone(tz)
+
+        # Get the current step for the participant
+        participant = self.participants.first()  # This should be called with a specific participant
+        if not participant:
+            return None
+
+        progress = participant.drip_campaign_progress.first()
+        if not progress:
+            # Start with the first step
+            first_step = self.drip_schedule.message_steps.order_by('order').first()
+            if not first_step:
+                return None
+            progress = DripCampaignProgress.objects.create(
+                participant=participant,
+                current_step=first_step,
+                next_scheduled_interval=now
+            )
+            return now
+
+        # Get the next step
+        current_step = progress.current_step
+        if not current_step:
+            return None
+
+        next_step = self.drip_schedule.message_steps.filter(order__gt=current_step.order).order_by('order').first()
+        if not next_step:
+            return None
+
+        # Calculate next send time based on the current step's delay
+        if not last_send_time:
+            next_time = now
+        else:
+            next_time = last_send_time + current_step.get_delay_timedelta()
+
+        # Apply business hours and weekend restrictions
+        if self.drip_schedule.business_hours_only:
+            start_time = self.drip_schedule.start_time
+            end_time = self.drip_schedule.end_time
+
+            if next_time.time() < start_time:
+                next_time = datetime.combine(next_time.date(), start_time)
+            elif next_time.time() > end_time:
+                next_time = datetime.combine(next_time.date() + timedelta(days=1), start_time)
+
+        if self.drip_schedule.exclude_weekends:
+            while next_time.weekday() >= 5:
+                next_time += timedelta(days=1)
+
+        # Update progress
+        progress.current_step = next_step
+        progress.next_scheduled_interval = next_time
+        progress.save()
+
+        return next_time
+
+    def _get_reminder_next_send_time(self, last_send_time=None):
+        """Calculate next send time for reminder campaigns"""
+        if not hasattr(self, 'reminder_schedule'):
+            return None
+
+        # Implementation for reminder campaigns
+        pass
+
+    def _get_blast_next_send_time(self):
+        """Get send time for blast campaigns"""
+        if not hasattr(self, 'blast_schedule'):
+            return None
+        return self.blast_schedule.send_time
+
+    def move_to_next_step(self, next_step, event_type='enter_step', metadata=None):
+        """Move participant to next step and create event"""
+        if not self.journey:
+            raise ValidationError("Cannot move to next step for bulk campaigns")
+
+        self.current_journey_step = next_step
+        self.last_event_at = timezone.now()
+        self.save()
+
+        JourneyEvent.objects.create(
+            participant=self,
+            journey_step=next_step,
+            event_type=event_type,
+            metadata=metadata,
+            created_by=self.last_updated_by
+        )
 
     def replace_variables(self, context):
         """
@@ -236,113 +423,6 @@ class CampaignScheduleBase(models.Model):
         abstract = True
         managed = False
 
-class DripCampaignSchedule(CampaignScheduleBase):
-    """Schedule settings for drip campaigns"""
-    campaign = models.OneToOneField(LeadNurturingCampaign, on_delete=models.CASCADE, related_name='drip_schedule')
-    interval = models.PositiveIntegerField(help_text="Interval in hours")
-    max_messages = models.PositiveIntegerField()
-    start_time = models.TimeField()
-    end_time = models.TimeField()
-    exclude_weekends = models.BooleanField(default=False)
-
-    def clean(self):
-        super().clean()
-        if self.start_time >= self.end_time:
-            raise ValidationError("End time must be after start time")
-
-    class Meta:
-        managed = False
-        db_table = 'acs_dripcampaignschedule'
-
-class ReminderCampaignSchedule(CampaignScheduleBase):
-    """Schedule settings for reminder campaigns"""
-    campaign = models.OneToOneField(LeadNurturingCampaign, on_delete=models.CASCADE, related_name='reminder_schedule')
-    use_relative_schedule = models.BooleanField(
-        default=False,
-        help_text="If True, reminders will be scheduled relative to appointment time"
-    )
-
-    class Meta:
-        managed = False
-        db_table = 'acs_remindercampaignschedule'
-
-class ReminderTime(models.Model):
-    """Individual reminder times for reminder campaigns"""
-    schedule = models.ForeignKey(ReminderCampaignSchedule, on_delete=models.CASCADE, related_name='reminder_times')
-    days_before = models.PositiveIntegerField(null=True, blank=True)
-    time = models.TimeField(null=True, blank=True)
-    days_before_relative = models.PositiveIntegerField(null=True, blank=True)
-    hours_before = models.PositiveIntegerField(null=True, blank=True)
-    minutes_before = models.PositiveIntegerField(null=True, blank=True)
-
-    class Meta:
-        managed = False
-        db_table = 'acs_remindertime'
-        ordering = ['days_before', 'days_before_relative', 'hours_before', 'minutes_before']
-        unique_together = [
-            ['schedule', 'days_before', 'time'],
-            ['schedule', 'days_before_relative', 'hours_before', 'minutes_before']
-        ]
-
-    def clean(self):
-        super().clean()
-        absolute_fields = bool(self.days_before is not None and self.time is not None)
-        relative_fields = bool(
-            self.days_before_relative is not None or 
-            self.hours_before is not None or 
-            self.minutes_before is not None
-        )
-        
-        if absolute_fields and relative_fields:
-            raise ValidationError(
-                "Cannot mix absolute and relative scheduling"
-            )
-
-class BlastCampaignSchedule(CampaignScheduleBase):
-    """Schedule settings for blast campaigns"""
-    campaign = models.OneToOneField(LeadNurturingCampaign, on_delete=models.CASCADE, related_name='blast_schedule')
-    send_time = models.DateTimeField()
-    timezone = models.CharField(max_length=50, null=True, blank=True)
-
-    class Meta:
-        managed = False
-        db_table = 'acs_blastcampaignschedule'
-
-class JourneyCampaignSchedule(CampaignScheduleBase):
-    """Schedule settings for journey-based campaigns"""
-    campaign = models.OneToOneField(LeadNurturingCampaign, on_delete=models.CASCADE, related_name='journey_schedule')
-    start_time = models.TimeField(null=True, blank=True)
-    end_time = models.TimeField(null=True, blank=True)
-    exclude_weekends = models.BooleanField(default=False)
-    exclude_holidays = models.BooleanField(default=False)
-    min_step_delay = models.PositiveIntegerField(default=0)
-    max_steps_per_day = models.PositiveIntegerField(null=True, blank=True)
-    max_retry_attempts = models.PositiveIntegerField(default=3)
-    retry_delay_minutes = models.PositiveIntegerField(default=60)
-    step_timeout_minutes = models.PositiveIntegerField(default=1440)
-    allow_parallel_steps = models.BooleanField(default=False)
-    max_parallel_steps = models.PositiveIntegerField(default=1)
-    timezone = models.CharField(max_length=50, null=True, blank=True)
-
-    def clean(self):
-        super().clean()
-        if self.start_time and self.end_time and self.start_time >= self.end_time:
-            raise ValidationError("End time must be after start time")
-        if self.allow_parallel_steps and self.max_parallel_steps < 1:
-            raise ValidationError("max_parallel_steps must be at least 1")
-        if self.max_steps_per_day is not None and self.max_steps_per_day < 1:
-            raise ValidationError("max_steps_per_day must be at least 1")
-        if self.max_retry_attempts < 1:
-            raise ValidationError("max_retry_attempts must be at least 1")
-        if self.retry_delay_minutes < 1:
-            raise ValidationError("retry_delay_minutes must be at least 1")
-        if self.step_timeout_minutes < 1:
-            raise ValidationError("step_timeout_minutes must be at least 1")
-
-    class Meta:
-        managed = False
-        db_table = 'asc_journeycampaignschedule'
-
 class CampaignProgressBase(models.Model):
     """Base model for campaign progress tracking"""
     participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE)
@@ -352,52 +432,6 @@ class CampaignProgressBase(models.Model):
     class Meta:
         abstract = True
         managed = False
-
-class DripCampaignProgress(CampaignProgressBase):
-    """Tracks progress for drip campaigns"""
-    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='drip_campaign_progress')
-    last_interval = models.DateTimeField(null=True, blank=True)
-    intervals_completed = models.PositiveIntegerField(default=0)
-    total_intervals = models.PositiveIntegerField()
-    next_scheduled_interval = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        managed = False
-        db_table = 'drip_campaign_progress'
-        indexes = [
-            models.Index(fields=['last_interval']),
-            models.Index(fields=['next_scheduled_interval']),
-        ]
-
-class ReminderCampaignProgress(CampaignProgressBase):
-    """Tracks progress for reminder campaigns"""
-    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='reminder_campaign_progress')
-    days_before = models.PositiveIntegerField()
-    sent_at = models.DateTimeField()
-    next_scheduled_reminder = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        managed = False
-        db_table = 'reminder_campaign_progress'
-        indexes = [
-            models.Index(fields=['days_before']),
-            models.Index(fields=['sent_at']),
-            models.Index(fields=['next_scheduled_reminder']),
-        ]
-
-class BlastCampaignProgress(CampaignProgressBase):
-    """Tracks progress for blast campaigns"""
-    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='blast_campaign_progress')
-    message_sent = models.BooleanField(default=False)
-    sent_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        managed = False
-        db_table = 'blast_campaign_progress'
-        indexes = [
-            models.Index(fields=['message_sent']),
-            models.Index(fields=['sent_at']),
-        ]
 
 class BulkCampaignMessage(models.Model):
     STATUS_CHOICES = [
@@ -412,7 +446,7 @@ class BulkCampaignMessage(models.Model):
         ('opted_out', 'Opted Out')
     ]
 
-    campaign = models.ForeignKey(LeadNurturingCampaign, on_delete=models.CASCADE, related_name='messages')
+    campaign = models.ForeignKey('LeadNurturingCampaign', on_delete=models.CASCADE, related_name='messages')
     participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='bulk_messages')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     scheduled_for = models.DateTimeField(null=True, blank=True)
@@ -426,6 +460,21 @@ class BulkCampaignMessage(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # New fields for drip campaign message steps
+    drip_message_step = models.ForeignKey(
+        'DripCampaignMessageStep',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='messages',
+        help_text="The message step that generated this message (for drip campaigns)"
+    )
+    step_order = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="The order of the message step in the drip sequence"
+    )
+
     class Meta:
         managed = False
         db_table = 'bulk_campaign_message'
@@ -434,7 +483,12 @@ class BulkCampaignMessage(models.Model):
             models.Index(fields=['campaign', 'status']),
             models.Index(fields=['participant', 'status']),
             models.Index(fields=['scheduled_for']),
+            models.Index(fields=['drip_message_step']),
+            models.Index(fields=['step_order']),
         ]
+
+    def __str__(self):
+        return f"{self.campaign.name} - {self.participant.lead.email} - {self.status}"
 
     def update_status(self, new_status, metadata=None):
         """Update message status and related timestamps"""
@@ -468,6 +522,39 @@ class BulkCampaignMessage(models.Model):
             return False
 
         return self.campaign.can_send_message(self.participant)
+
+    def get_message_content(self):
+        """Get the message content based on campaign type and message step"""
+        # Prepare context for variable replacement
+        lead = self.participant.lead
+        campaign = self.campaign
+        context = {
+            'lead': {
+                'first_name': lead.first_name,
+                'last_name': lead.last_name,
+                'email': lead.email,
+                'phone_number': lead.phone_number,
+                'company': lead.company_name if hasattr(lead, 'company_name') else None,
+                'title': lead.title if hasattr(lead, 'title') else None,
+            },
+            'campaign': {
+                'name': campaign.name,
+                'type': campaign.campaign_type,
+                'channel': campaign.channel,
+            }
+        }
+
+        if self.campaign.campaign_type == 'drip' and self.drip_message_step:
+            # For drip campaigns, use the content from the message step
+            if self.drip_message_step.template:
+                return self.drip_message_step.template.replace_variables(context)
+            # For direct content in message step, use the utility function
+            return replace_variables(self.drip_message_step.content, context)
+        elif self.campaign.template:
+            # For other campaign types, use the campaign template
+            return self.campaign.template.replace_variables(context)
+        # For direct content in campaign, use the utility function
+        return replace_variables(self.campaign.content, context)
 
 class LeadNurturingParticipant(models.Model):
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='lead_nurturing_participations')
@@ -566,16 +653,14 @@ class LeadNurturingParticipant(models.Model):
 
     def _update_drip_progress(self, now, scheduled_time):
         """Update progress for drip campaigns"""
-        progress, created = DripCampaignProgress.objects.get_or_create(
-            participant=self,
-            defaults={
-                'total_intervals': self.nurturing_campaign.drip_schedule.max_messages
-            }
-        )
+        progress = self.drip_campaign_progress.first()
+        if not progress:
+            progress = DripCampaignProgress.objects.create(
+                participant=self
+            )
         
         if self.messages_sent_count > 0:
             progress.last_interval = now
-            progress.intervals_completed = self.messages_sent_count
         
         if scheduled_time:
             progress.next_scheduled_interval = scheduled_time
