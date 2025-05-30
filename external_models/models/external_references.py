@@ -311,3 +311,34 @@ class LeadStageHistory(models.Model):
         managed = False
         db_table = 'lead_stage_history'
         ordering = ['-entered_at'] 
+
+
+class ScheduledReachOut(models.Model):
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('closed', 'Closed'),
+    ]
+
+    campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name='scheduled_reachouts')
+    lead = models.ForeignKey(Lead, null=True, on_delete=models.CASCADE, related_name='scheduled_reachouts')
+    scheduled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='scheduled_reachouts'
+    )
+    scheduled_date = models.DateTimeField()
+    reason = models.TextField(blank=True, null=True)
+    description = models.CharField(max_length=500, null=True, blank=True)
+    notes = models.CharField(max_length=300, null=True, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='open')
+    google_event_id = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'scheduled_reachout'
+        ordering = ['-scheduled_date']
+
+    def __str__(self):
+        return f"Scheduled follow-up for {self.lead} on {self.scheduled_date} ({self.get_status_display()})"

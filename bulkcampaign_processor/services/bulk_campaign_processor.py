@@ -178,22 +178,31 @@ class BulkCampaignProcessor:
         schedule = campaign.reminder_schedule
         now = timezone.now()
 
-        # Find active participants that need reminders
+        # Find active participants that need reminders and have scheduled reachouts
         participants = LeadNurturingParticipant.objects.filter(
             nurturing_campaign=campaign,
-            status='active'
-        ).select_related('lead')
+            status='active',
+            lead__scheduled_reachouts__status='open'  # Only include leads with open scheduled reachouts
+        ).select_related('lead').distinct()
 
         scheduled_count = 0
 
         for participant in participants:
+            # Get the scheduled reachout for this lead
+            scheduled_reachout = participant.lead.scheduled_reachouts.filter(
+                status='open'
+            ).order_by('scheduled_date').first()
+
+            if not scheduled_reachout:
+                continue
+
             # Find next reminder time
             next_reminder = self._get_next_reminder_time(participant, schedule)
             if not next_reminder:
                 continue
 
             # Schedule reminder
-            if self._schedule_reminder_message(participant, next_reminder):
+            if self._schedule_reminder_message(participant, next_reminder, scheduled_reachout):
                 scheduled_count += 1
 
         return scheduled_count
@@ -269,21 +278,43 @@ class BulkCampaignProcessor:
             'days_before', 'days_before_relative', 'hours_before', 'minutes_before'
         )
 
+        # Get the scheduled reachout for this lead
+        scheduled_reachout = participant.lead.scheduled_reachouts.filter(
+            status='open'
+        ).order_by('scheduled_date').first()
+
+        if not scheduled_reachout:
+            logger.warning(f"No scheduled reachout found for participant {participant.id}")
+            return None
+
         if schedule.use_relative_schedule:
-            # For relative scheduling, we need the appointment time
-            appointment_time = participant.lead.appointment_time
+            # For relative scheduling, we need the scheduled reachout date
+            appointment_time = scheduled_reachout.scheduled_date
             if not appointment_time:
-                logger.warning(f"No appointment time found for participant {participant.id}")
+                logger.warning(f"No scheduled date found for participant {participant.id}")
                 return None
 
-            # Find the first reminder that hasn't been sent
-            sent_minutes = set(
-                participant.reminder_campaign_progress.values_list('minutes_before', flat=True)
-            )
-
+            # Get all sent reminders for this participant
+            sent_reminders = participant.reminder_campaign_progress.all()
+            
+            # For relative scheduling, we need to check if we've already sent reminders
+            # with the same relative timing
             for reminder in reminder_times:
+                # Calculate total minutes before appointment
                 total_minutes = reminder.get_total_minutes_before()
-                if total_minutes not in sent_minutes:
+                
+                # Check if we've already sent a reminder at this relative time
+                already_sent = False
+                for sent_reminder in sent_reminders:
+                    # Calculate the time difference between the sent reminder and appointment
+                    if sent_reminder.sent_at:
+                        time_diff = appointment_time - sent_reminder.sent_at
+                        sent_minutes = time_diff.total_seconds() / 60
+                        if abs(sent_minutes - total_minutes) < 1:  # Allow 1 minute tolerance
+                            already_sent = True
+                            break
+                
+                if not already_sent:
                     return reminder
 
         else:
@@ -381,12 +412,16 @@ class BulkCampaignProcessor:
             logger.exception(f"Error scheduling drip message for participant {participant.id}: {str(e)}")
             return False
 
-    def _schedule_reminder_message(self, participant, reminder):
+    def _schedule_reminder_message(self, participant, reminder, scheduled_reachout):
         """Schedule a reminder campaign message"""
         try:
             with transaction.atomic():
-                # Calculate send time based on reminder settings
-                send_time = self._calculate_reminder_time(reminder, participant)
+                # Calculate send time based on reminder settings and scheduled reachout date
+                send_time = self._calculate_reminder_time(reminder, participant, scheduled_reachout.scheduled_date)
+
+                if not send_time:
+                    logger.debug(f"No valid send time calculated for participant {participant.id}")
+                    return False
 
                 # Create message
                 message = BulkCampaignMessage.objects.create(
@@ -398,17 +433,23 @@ class BulkCampaignProcessor:
 
                 # Create progress record
                 if reminder.schedule.use_relative_schedule:
-                    minutes_before = reminder.get_total_minutes_before()
+                    # For relative scheduling, store all the relative timing fields
                     ReminderCampaignProgress.objects.create(
                         participant=participant,
-                        minutes_before=minutes_before,
-                        sent_at=send_time
+                        days_before_relative=reminder.days_before_relative,
+                        hours_before=reminder.hours_before,
+                        minutes_before=reminder.minutes_before,
+                        sent_at=send_time,
+                        reminder_time=reminder
                     )
                 else:
+                    # For absolute scheduling
                     ReminderCampaignProgress.objects.create(
                         participant=participant,
                         days_before=reminder.days_before,
-                        sent_at=send_time
+                        time=reminder.time,
+                        sent_at=send_time,
+                        reminder_time=reminder
                     )
 
                 # Update participant progress
@@ -518,29 +559,34 @@ class BulkCampaignProcessor:
 
         return now
 
-    def _calculate_reminder_time(self, reminder, participant=None):
+    def _calculate_reminder_time(self, reminder, participant=None, scheduled_reachout_date=None):
         """Calculate the send time for a reminder"""
         now = timezone.now()
 
         if reminder.schedule.use_relative_schedule:
-            if not participant or not participant.lead.appointment_time:
-                raise ValueError("Appointment time required for relative scheduling")
+            if not scheduled_reachout_date:
+                logger.warning("No scheduled reachout date provided for relative scheduling")
+                return None
 
-            appointment_time = participant.lead.appointment_time
             total_minutes = reminder.get_total_minutes_before()
             
-            # Calculate time before appointment
-            send_time = appointment_time - timezone.timedelta(minutes=total_minutes)
+            # Calculate time before scheduled reachout
+            send_time = scheduled_reachout_date - timezone.timedelta(minutes=total_minutes)
             
             # If the calculated time is in the past, return None
             if send_time <= now:
+                logger.debug(f"Calculated send time {send_time} is in the past")
                 return None
                 
             return send_time
         else:
             # Absolute scheduling
             if reminder.days_before is not None:
-                send_date = now.date() + timezone.timedelta(days=reminder.days_before)
+                if not scheduled_reachout_date:
+                    logger.warning("No scheduled reachout date provided for absolute scheduling")
+                    return None
+
+                send_date = scheduled_reachout_date.date() - timezone.timedelta(days=reminder.days_before)
                 if reminder.time:
                     return timezone.make_aware(timezone.datetime.combine(send_date, reminder.time))
                 return timezone.make_aware(timezone.datetime.combine(send_date, time(9, 0)))  # Default to 9 AM

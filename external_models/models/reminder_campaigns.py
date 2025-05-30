@@ -150,9 +150,20 @@ class ReminderTime(models.Model):
 class ReminderCampaignProgress(CampaignProgressBase):
     """Tracks progress for reminder campaigns"""
     participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='reminder_campaign_progress')
-    days_before = models.PositiveIntegerField()
+    
+    # Fields for absolute scheduling
+    days_before = models.PositiveIntegerField(null=True, blank=True)
+    time = models.TimeField(null=True, blank=True)
+    
+    # Fields for relative scheduling
+    days_before_relative = models.PositiveIntegerField(null=True, blank=True)
+    hours_before = models.PositiveIntegerField(null=True, blank=True)
+    minutes_before = models.PositiveIntegerField(null=True, blank=True)
+    
+    # Tracking fields
     sent_at = models.DateTimeField()
     next_scheduled_reminder = models.DateTimeField(null=True, blank=True)
+    reminder_time = models.ForeignKey(ReminderTime, on_delete=models.SET_NULL, null=True, related_name='progress_entries')
 
     class Meta:
         managed = False
@@ -161,4 +172,63 @@ class ReminderCampaignProgress(CampaignProgressBase):
             models.Index(fields=['days_before']),
             models.Index(fields=['sent_at']),
             models.Index(fields=['next_scheduled_reminder']),
-        ] 
+        ]
+
+    def clean(self):
+        """Validate reminder progress configuration"""
+        super().clean()
+
+        # Check that either absolute or relative scheduling is used, not both
+        absolute_fields = bool(self.days_before is not None and self.time is not None)
+        relative_fields = bool(
+            self.days_before_relative is not None or
+            self.hours_before is not None or
+            self.minutes_before is not None
+        )
+
+        if absolute_fields and relative_fields:
+            raise ValidationError(
+                "Cannot mix absolute and relative scheduling. Use either days_before/time "
+                "or days/hours/minutes before."
+            )
+
+        # Ensure all relative fields are 0 or greater
+        if self.days_before_relative is not None and self.days_before_relative < 0:
+            raise ValidationError("days_before_relative cannot be negative")
+        if self.hours_before is not None and self.hours_before < 0:
+            raise ValidationError("hours_before cannot be negative")
+        if self.minutes_before is not None and self.minutes_before < 0:
+            raise ValidationError("minutes_before cannot be negative")
+
+    def get_total_minutes_before(self):
+        """
+        Calculate total minutes before the appointment for relative scheduling
+
+        Returns:
+            int: Total number of minutes before the appointment
+        """
+        if not any([self.days_before_relative, self.hours_before, self.minutes_before]):
+            return None
+
+        total_minutes = 0
+        if self.days_before_relative:
+            total_minutes += self.days_before_relative * 24 * 60
+        if self.hours_before:
+            total_minutes += self.hours_before * 60
+        if self.minutes_before:
+            total_minutes += self.minutes_before
+
+        return total_minutes
+
+    def __str__(self):
+        if any([self.days_before_relative, self.hours_before, self.minutes_before]):
+            parts = []
+            if self.days_before_relative:
+                parts.append(f"{self.days_before_relative} days")
+            if self.hours_before:
+                parts.append(f"{self.hours_before} hours")
+            if self.minutes_before:
+                parts.append(f"{self.minutes_before} minutes")
+            return f"Reminder {' '.join(parts)} before appointment"
+        else:
+            return f"Reminder {self.days_before} days before at {self.time}" 

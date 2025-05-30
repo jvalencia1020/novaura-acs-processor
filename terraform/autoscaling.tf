@@ -26,8 +26,8 @@ resource "aws_appautoscaling_policy" "journey_worker_policy" {
 
 # Auto-scaling for Bulk Campaign Worker
 resource "aws_appautoscaling_target" "bulk_campaign_worker_target" {
-  max_capacity       = 0
-  min_capacity       = 0
+  max_capacity       = 10
+  min_capacity       = 1
   resource_id        = "service/${aws_ecs_cluster.processor_cluster.name}/${aws_ecs_service.bulk_campaign_worker_service.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
