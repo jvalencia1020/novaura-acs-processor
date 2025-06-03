@@ -35,7 +35,7 @@ resource "aws_ecs_task_definition" "bulk_campaign_scheduler_task" {
   container_definitions = jsonencode([
     {
       name      = "bulk-campaign-scheduler"
-      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:${var.image_tag}"
       essential = true
       command   = ["python", "manage.py", "process_bulk_campaigns"]
       
@@ -90,7 +90,7 @@ resource "aws_ecs_task_definition" "journey_scheduler_task" {
   container_definitions = jsonencode([
     {
       name      = "journey-scheduler"
-      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:${var.image_tag}"
       essential = true
       command   = ["python", "manage.py", "run_scheduler"]
       
@@ -145,7 +145,7 @@ resource "aws_ecs_task_definition" "journey_worker_task" {
   container_definitions = jsonencode([
     {
       name      = "journey-worker"
-      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:${var.image_tag}"
       essential = true
       command   = ["python", "manage.py", "run_worker"]
       
@@ -208,7 +208,7 @@ resource "aws_ecs_task_definition" "bulk_campaign_worker_task" {
   container_definitions = jsonencode([
     {
       name      = "bulk-campaign-worker"
-      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:${var.image_tag}"
       essential = true
       command   = ["python", "manage.py", "process_due_messages"]
       

@@ -72,6 +72,12 @@ variable "ecr_repository_url" {
   type        = string
 }
 
+variable "image_tag" {
+  description = "Docker image tag to deploy"
+  type        = string
+  default     = "latest"
+}
+
 variable "db_name" {
   description = "Database name"
   type        = string
