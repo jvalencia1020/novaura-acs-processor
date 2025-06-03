@@ -73,9 +73,14 @@ variable "ecr_repository_url" {
 }
 
 variable "image_tag" {
-  description = "Docker image tag to deploy"
+  description = "Docker image tag to deploy. When deploying locally, you should specify the exact commit SHA or tag you want to deploy. Using 'latest' is not recommended for production deployments."
   type        = string
   default     = "latest"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9_.-]*$", var.image_tag))
+    error_message = "The image_tag value must be a valid Docker tag."
+  }
 }
 
 variable "db_name" {
