@@ -214,10 +214,16 @@ class BulkCampaignProcessor:
             return 0
 
         schedule = campaign.blast_schedule
-        now_utc = timezone.now().astimezone(pytz.UTC)
+        now = timezone.now()
 
         # Check if it's time to send the blast
-        if schedule.send_time > now_utc:
+        if schedule.send_time > now:
+            logger.debug(f"Blast campaign {campaign.id} send time {schedule.send_time} is in the future")
+            return 0
+
+        # Check if campaign is active
+        if not campaign.is_active_or_scheduled():
+            logger.debug(f"Blast campaign {campaign.id} is not active or scheduled")
             return 0
 
         # Find active participants that haven't received the blast
@@ -228,13 +234,30 @@ class BulkCampaignProcessor:
             bulk_messages__campaign=campaign
         ).select_related('lead')
 
+        logger.info(f"Processing blast campaign {campaign.id} with {participants.count()} active participants")
         scheduled_count = 0
 
         for participant in participants:
-            # Schedule blast message
-            if self._schedule_blast_message(participant, schedule):
-                scheduled_count += 1
+            try:
+                # Check if we should send based on business hours
+                if schedule.business_hours_only:
+                    current_time = now.time()
+                    if current_time < schedule.start_time:
+                        logger.debug(f"Skipping participant {participant.id} - outside business hours")
+                        continue
 
+                # Schedule blast message
+                if self._schedule_blast_message(participant, schedule):
+                    scheduled_count += 1
+                    logger.info(f"Successfully scheduled blast message for participant {participant.id}")
+                else:
+                    logger.error(f"Failed to schedule blast message for participant {participant.id}")
+
+            except Exception as e:
+                logger.exception(f"Error processing participant {participant.id}: {e}")
+                continue
+
+        logger.info(f"Scheduled {scheduled_count} messages for blast campaign {campaign.id}")
         return scheduled_count
 
     def _should_send_drip_message(self, participant, schedule):
@@ -466,12 +489,37 @@ class BulkCampaignProcessor:
         """Schedule a blast campaign message"""
         try:
             with transaction.atomic():
+                send_time = schedule.send_time
+
+                # Check if we should send based on business hours
+                if schedule.business_hours_only:
+                    current_time = send_time.time()
+                    if current_time < schedule.start_time:
+                        # Move to start time today
+                        send_time = timezone.make_aware(
+                            timezone.datetime.combine(send_time.date(), schedule.start_time)
+                        )
+                    elif current_time > schedule.end_time:
+                        # Move to start time next day
+                        send_time = timezone.make_aware(
+                            timezone.datetime.combine(send_time.date() + timedelta(days=1), schedule.start_time)
+                        )
+
                 # Create message
                 message = BulkCampaignMessage.objects.create(
                     campaign=participant.nurturing_campaign,
                     participant=participant,
                     status='scheduled',
-                    scheduled_for=schedule.send_time
+                    scheduled_for=send_time
+                )
+
+                # Create or update blast progress
+                progress, created = BlastCampaignProgress.objects.get_or_create(
+                    participant=participant,
+                    defaults={
+                        'message_sent': False,
+                        'sent_at': None
+                    }
                 )
 
                 # Update participant progress
@@ -479,9 +527,11 @@ class BulkCampaignProcessor:
                     scheduled_time=message.scheduled_for
                 )
 
+                logger.info(f"Scheduled blast message for participant {participant.id} at {send_time}")
                 return True
+
         except Exception as e:
-            logger.exception(f"Error scheduling blast message: {e}")
+            logger.exception(f"Error scheduling blast message for participant {participant.id}: {e}")
             return False
 
     def _send_message(self, message):
