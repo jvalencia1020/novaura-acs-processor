@@ -9,9 +9,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         try:
-            logger.info("Starting manual due messages processing")
             process_due_messages()
-            logger.info("Completed manual due messages processing")
             self.stdout.write(self.style.SUCCESS('Successfully processed due messages'))
         except Exception as e:
             logger.error(f"Error processing due messages: {str(e)}")

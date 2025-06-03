@@ -13,9 +13,7 @@ class Command(BaseCommand):
         os.environ['PYDEVD_DISABLE_FILE_VALIDATION'] = '1'
         
         try:
-            logger.info("Starting manual bulk campaign processing")
             process_bulk_campaigns()
-            logger.info("Completed manual bulk campaign processing")
             self.stdout.write(self.style.SUCCESS('Successfully processed bulk campaigns'))
         except Exception as e:
             logger.error(f"Error processing bulk campaigns: {str(e)}")
