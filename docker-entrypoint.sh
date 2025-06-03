@@ -75,7 +75,7 @@ echo "Database is ready!"
 case "$SERVICE_TYPE" in
   "bulk_campaign_scheduler")
     echo "Starting bulk campaign processor scheduler..."
-    exec python manage.py run_bulk_campaign_processor
+    exec python manage.py process_bulk_campaigns
     ;;
   "bulk_campaign_worker")
     echo "Starting bulk campaign processor worker..."

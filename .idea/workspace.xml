@@ -6,7 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -28,14 +27,14 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "Python.process_bulk_campaigns.executor": "Run",
-    "Python.process_due_messages.executor": "Debug",
+    "Python.process_due_messages.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "git-widget-placeholder": "main",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
-  <component name="RunManager" selected="Python.process_bulk_campaigns">
+  <component name="RunManager" selected="Python.process_due_messages">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
@@ -187,12 +186,12 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>562</line>
+          <line>552</line>
           <option name="timeStamp" value="6" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>720</line>
+          <line>710</line>
           <option name="timeStamp" value="7" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -202,12 +201,12 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>364</line>
+          <line>359</line>
           <option name="timeStamp" value="12" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>742</line>
+          <line>732</line>
           <option name="timeStamp" value="18" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
