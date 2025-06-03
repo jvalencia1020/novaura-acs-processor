@@ -65,8 +65,10 @@ class BulkCampaignProcessor:
         Returns:
             int: Number of messages scheduled/sent
         """
+        logger.info(f"Starting to process campaign {campaign.id} (type: {campaign.campaign_type}, status: {campaign.status})")
+        
         if not campaign.is_active_or_scheduled():
-            logger.debug(f"Skipping inactive campaign {campaign}")
+            logger.warning(f"Skipping inactive campaign {campaign.id} - Status: {campaign.status}")
             return 0
 
         processor = self.campaign_processors.get(campaign.campaign_type)
@@ -74,7 +76,14 @@ class BulkCampaignProcessor:
             logger.error(f"No processor found for campaign type: {campaign.campaign_type}")
             return 0
 
-        return processor(campaign)
+        try:
+            logger.info(f"Using {campaign.campaign_type} processor for campaign {campaign.id}")
+            result = processor(campaign)
+            logger.info(f"Campaign {campaign.id} processing completed - {result} messages scheduled/sent")
+            return result
+        except Exception as e:
+            logger.exception(f"Error processing campaign {campaign.id}: {str(e)}")
+            return 0
 
     def process_due_messages(self):
         """
@@ -110,12 +119,15 @@ class BulkCampaignProcessor:
 
     def _process_drip_campaign(self, campaign):
         """Process a drip campaign"""
+        logger.info(f"Starting drip campaign processing for campaign {campaign.id}")
+        
         if not campaign.drip_schedule:
             logger.error(f"Drip campaign {campaign.id} has no schedule")
             return 0
 
         schedule = campaign.drip_schedule
         now = timezone.now()
+        logger.info(f"Current time: {now}")
 
         # Find active participants that need messages
         participants = LeadNurturingParticipant.objects.filter(
@@ -128,11 +140,14 @@ class BulkCampaignProcessor:
 
         for participant in participants:
             try:
+                logger.info(f"Processing participant {participant.id} for campaign {campaign.id}")
+                
                 # Get or create progress
                 progress = participant.drip_campaign_progress.first()
                 
                 # If no progress exists, we should start with the first step
                 if not progress:
+                    logger.info(f"No progress found for participant {participant.id}, creating initial progress")
                     first_step = schedule.message_steps.order_by('order').first()
                     if not first_step:
                         logger.error(f"No message steps found for drip schedule {schedule.id}")
@@ -143,14 +158,18 @@ class BulkCampaignProcessor:
                         current_step=first_step,
                         next_scheduled_interval=now
                     )
+                    logger.info(f"Created initial progress for participant {participant.id} with step {first_step.order}")
                 
                 # If no current step, we're done with the sequence
                 if not progress.current_step:
-                    logger.debug(f"Participant {participant.id} has completed all steps")
+                    logger.info(f"Participant {participant.id} has completed all steps")
                     continue
                 
                 # Check if it's time for next message
-                if not self._should_send_drip_message(participant, schedule):
+                should_send = self._should_send_drip_message(participant, schedule)
+                logger.info(f"Should send message for participant {participant.id}: {should_send}")
+                
+                if not should_send:
                     logger.debug(f"Not time to send message for participant {participant.id}")
                     continue
 
@@ -163,10 +182,10 @@ class BulkCampaignProcessor:
                     logger.error(f"Failed to schedule message for participant {participant.id}")
 
             except Exception as e:
-                logger.exception(f"Error processing participant {participant.id}: {e}")
+                logger.exception(f"Error processing participant {participant.id}: {str(e)}")
                 continue
 
-        logger.info(f"Scheduled {scheduled_count} messages for campaign {campaign.id}")
+        logger.info(f"Completed drip campaign processing for campaign {campaign.id} - Scheduled {scheduled_count} messages")
         return scheduled_count
 
     def _process_reminder_campaign(self, campaign):
@@ -261,37 +280,42 @@ class BulkCampaignProcessor:
         return scheduled_count
 
     def _should_send_drip_message(self, participant, schedule):
-        """Check if a drip message should be sent to participant"""
-        # Get the participant's progress
+        """Check if it's time to send the next message for a participant"""
+        logger.info(f"Checking if should send message for participant {participant.id}")
+        
         progress = participant.drip_campaign_progress.first()
-        
-        # If no progress exists, we should send the first message
         if not progress:
-            return True
-        
-        # If no current step, we're done with the sequence
+            logger.error(f"No progress found for participant {participant.id}")
+            return False
+
         if not progress.current_step:
+            logger.info(f"Participant {participant.id} has no current step")
             return False
-        
-        # Check if we have a next scheduled interval
-        if not progress.next_scheduled_interval:
-            return True
-        
-        # Check if it's time for the next message
+
         now = timezone.now()
+        logger.info(f"Current time: {now}, Next scheduled time: {progress.next_scheduled_interval}")
+
+        # Check if we're past the scheduled time
         if now < progress.next_scheduled_interval:
+            logger.info(f"Not yet time to send message for participant {participant.id} - Scheduled for {progress.next_scheduled_interval}")
             return False
-        
+
         # Check business hours if enabled
         if schedule.business_hours_only:
-            current_time = now.time()
-            if current_time < schedule.start_time or current_time > schedule.end_time:
+            logger.info(f"Business hours enabled for schedule {schedule.id}")
+            current_hour = now.hour
+            if current_hour < schedule.start_time or current_hour >= schedule.end_time:
+                logger.info(f"Outside business hours for participant {participant.id} - Current hour: {current_hour}, Business hours: {schedule.start_time}-{schedule.end_time}")
                 return False
-        
-        # Check weekends if excluded
-        if schedule.exclude_weekends and now.weekday() >= 5:
-            return False
-        
+
+        # Check weekend restrictions if enabled
+        if schedule.exclude_weekends:
+            logger.info(f"Weekend restrictions enabled for schedule {schedule.id}")
+            if now.weekday() >= 5:  # 5 is Saturday, 6 is Sunday
+                logger.info(f"Weekend restriction active for participant {participant.id} - Current day: {now.weekday()}")
+                return False
+
+        logger.info(f"All checks passed - Should send message for participant {participant.id}")
         return True
 
     def _get_next_reminder_time(self, participant, schedule):
