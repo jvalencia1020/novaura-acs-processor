@@ -28,13 +28,14 @@
   "keyToString": {
     "Python.process_bulk_campaigns.executor": "Run",
     "Python.process_due_messages.executor": "Run",
+    "Python.run_bulk_campaign_processor.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "git-widget-placeholder": "main",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
-  <component name="RunManager" selected="Python.process_due_messages">
+  <component name="RunManager" selected="Python.process_bulk_campaigns">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
