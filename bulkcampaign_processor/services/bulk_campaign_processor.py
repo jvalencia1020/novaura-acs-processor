@@ -39,6 +39,8 @@ from external_models.models.communications import (
 
 from django.conf import settings
 import time
+from twilio.http import HttpClient
+from twilio.base.exceptions import TwilioRestException
 
 logger = logging.getLogger(__name__)
 
@@ -266,8 +268,8 @@ class BulkCampaignProcessor:
 
         # Check business hours if enabled
         if schedule.business_hours_only:
-            current_hour = now.hour
-            if current_hour < schedule.start_time or current_hour >= schedule.end_time:
+            current_time = now.time()
+            if current_time < schedule.start_time or current_time >= schedule.end_time:
                 return False
 
         # Check weekend restrictions if enabled
@@ -384,9 +386,10 @@ class BulkCampaignProcessor:
                 progress.next_scheduled_interval = next_time
                 progress.save()
                 
-                # Validate message step has content
-                if not current_step.template and not current_step.content:
-                    logger.error(f"Message step {current_step.id} has no content or template")
+                # Validate message step has content through channel config
+                channel_config = current_step.get_channel_config()
+                if not channel_config or not channel_config.content:
+                    logger.error(f"Message step {current_step.id} has no content in channel config")
                     return False
 
                 # Create message
@@ -689,82 +692,97 @@ class BulkCampaignProcessor:
 
     def _send_sms(self, message):
         """Send an SMS message using Twilio's direct messaging API"""
-        try:
-            # Get campaign and participant
-            campaign = message.campaign
-            participant = message.participant
-            lead = participant.lead
+        max_retries = 3
+        base_delay = 1  # Base delay in seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # Get campaign and participant
+                campaign = message.campaign
+                participant = message.participant
+                lead = participant.lead
 
-            # Prepare context for variable replacement
-            context = {
-                'lead': {
-                    'first_name': lead.first_name,
-                    'last_name': lead.last_name,
-                    'email': lead.email,
-                    'phone_number': lead.phone_number,
-                    'company': lead.company_name if hasattr(lead, 'company_name') else None,
-                    'title': lead.title if hasattr(lead, 'title') else None,
-                },
-                'campaign': {
-                    'name': campaign.name,
-                    'type': campaign.campaign_type,
-                    'channel': campaign.channel,
-                }
-            }
+                # Get the SMS config
+                sms_config = None
+                if campaign.campaign_type == 'drip' and message.drip_message_step:
+                    sms_config = message.drip_message_step.sms_config
+                elif campaign.campaign_type == 'reminder' and message.reminder_message:
+                    sms_config = message.reminder_message.sms_config
+                else:
+                    sms_config = campaign.sms_config
 
-            # Get message content using the appropriate source
-            processed_content = message.get_message_content()
+                if not sms_config:
+                    raise ValueError("No SMS configuration found for the message")
 
-            # Get the service phone number
-            service_phone = None
-            if message.campaign.config and message.campaign.config.get('from_number'):
-                service_phone = message.campaign.config['from_number']
-            elif message.campaign.crm_campaign and message.campaign.crm_campaign.campaign_from_number:
-                service_phone = message.campaign.crm_campaign.campaign_from_number
+                # Get the service phone number from the SMS config
+                service_phone = sms_config.get_from_number()
+                if not service_phone:
+                    raise ValueError("No service phone number found in SMS configuration")
 
-            if not service_phone:
-                raise ValueError("No service phone number found in campaign configuration")
+                # Format phone numbers
+                formatted_to = self._format_phone_number(lead.phone_number)
+                formatted_from = self._format_phone_number(service_phone)
 
-            # Format phone numbers
-            formatted_to = self._format_phone_number(lead.phone_number)
-            formatted_from = self._format_phone_number(service_phone)
+                if not formatted_to or not formatted_from:
+                    raise ValueError("Invalid phone number format")
 
-            if not formatted_to or not formatted_from:
-                raise ValueError("Invalid phone number format")
+                # Initialize Twilio client with custom configuration
+                client = Client(
+                    settings.TWILIO_ACCOUNT_SID,
+                    settings.TWILIO_AUTH_TOKEN,
+                )
 
-            # Initialize Twilio client
-            client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+                # Get message content using the appropriate source
+                processed_content = message.get_message_content()
 
-            # Send message directly
-            twilio_message = client.messages.create(
-                body=processed_content,
-                from_=formatted_from,
-                to=formatted_to
-            )
+                # Send message directly
+                twilio_message = client.messages.create(
+                    body=processed_content,
+                    from_=formatted_from,
+                    to=formatted_to,
+                )
 
-            # Create thread for tracking
-            thread = ConversationThread.objects.create(
-                lead=lead,
-                channel='sms',
-                status='open',
-                last_message_timestamp=timezone.now()
-            )
+                # Create thread for tracking
+                thread = ConversationThread.objects.create(
+                    lead=lead,
+                    channel='sms',
+                    status='open',
+                    last_message_timestamp=timezone.now()
+                )
 
-            # Create thread message
-            ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
-                content=processed_content,
-                channel='sms',
-                lead=lead,
-                user=campaign.created_by
-            )
+                # Create thread message
+                ThreadMessage.objects.create(
+                    thread=thread,
+                    sender_type='user',
+                    content=processed_content,
+                    channel='sms',
+                    lead=lead,
+                    user=campaign.created_by,
+                    twilio_message=ConversationMessage.objects.create(
+                        message_sid=twilio_message.sid,
+                        conversation=None,  # Not using conversations API for direct messages
+                        body=processed_content,
+                        direction='outbound',
+                        channel='sms'
+                    )
+                )
 
-            return True
+                return True
 
-        except Exception as e:
-            logger.error(f"Error sending SMS message: {str(e)}")
-            return False
+            except (TwilioRestException) as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"Connection timeout on attempt {attempt + 1}/{max_retries}. Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                    continue
+                logger.error(f"Error sending SMS message after {max_retries} attempts: {str(e)}")
+                return False
+                
+            except Exception as e:
+                logger.error(f"Error sending SMS message: {str(e)}")
+                return False
+
+        return False
 
     def _send_voice(self, message):
         """Send a voice message using Bland AI"""

@@ -1,6 +1,6 @@
 from django.db import models
 from django.conf import settings
-from external_models.models.external_references import Lead
+from external_models.models.external_references import Lead, Account, Campaign, Funnel
 from external_models.models.reporting import BlandAICall
 
 
@@ -271,3 +271,125 @@ class ThreadMessage(models.Model):
 
     def __str__(self):
         return f"Message {self.id} in Thread {self.thread.id}"
+
+
+class ContactEndpointChannel(models.Model):
+    CHANNEL_CHOICES = (
+        ('sms', 'SMS'),
+        ('voice', 'Voice'),
+        ('email', 'Email'),
+        ('social', 'Social Media'),
+    )
+
+    endpoint = models.ForeignKey('ContactEndpoint', on_delete=models.CASCADE, related_name='channels')
+    channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES)
+
+    class Meta:
+        managed = False
+        unique_together = ('endpoint', 'channel')
+        db_table = 'contact_endpoint_channel'
+
+    def __str__(self):
+        return f"{self.endpoint.value} - {self.channel}"
+
+
+class ContactEndpoint(models.Model):
+    PLATFORM_CHOICES = (
+        # Phone platforms
+        ('twilio', 'Twilio'),
+        ('vonage', 'Vonage'),
+        ('bandwidth', 'Bandwidth'),
+        ('plivo', 'Plivo'),
+        # Email platforms
+        ('gmail', 'Gmail'),
+        ('outlook', 'Outlook'),
+        ('sendgrid', 'SendGrid'),
+        ('mailchimp', 'Mailchimp'),
+        # Social platforms
+        ('facebook', 'Facebook'),
+        ('instagram', 'Instagram'),
+        ('twitter', 'Twitter'),
+        ('linkedin', 'LinkedIn'),
+        ('whatsapp', 'WhatsApp'),
+        # Other
+        ('other', 'Other'),
+    )
+
+    PRIORITY_CHOICES = (
+        ('primary', 'Primary'),
+        ('secondary', 'Secondary'),
+        ('backup', 'Backup'),
+    )
+
+    # Contact info
+    value = models.CharField(
+        max_length=255,
+        help_text="Phone number, email address, or social handle"
+    )
+    platform = models.CharField(
+        max_length=50,
+        choices=PLATFORM_CHOICES,
+        null=True,
+        blank=True,
+        help_text="Platform or service provider for this contact endpoint"
+    )
+
+    # Enhancements
+    label = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="User-friendly label (e.g. 'Work Phone', 'Personal Email')"
+    )
+    priority = models.CharField(
+        max_length=10,
+        choices=PRIORITY_CHOICES,
+        default='primary',
+        help_text="Preferred usage priority for this endpoint"
+    )
+    is_primary = models.BooleanField(default=False)
+    is_verified = models.BooleanField(default=False)
+
+    # CRM Relationships
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contact_endpoints'
+    )
+    campaign = models.ForeignKey(
+        Campaign,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contact_endpoints'
+    )
+    funnel = models.ForeignKey(
+        Funnel,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contact_endpoints'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = False
+        db_table = 'contact_endpoint'
+        indexes = [
+            models.Index(fields=['value']),
+        ]
+
+    def __str__(self):
+        label = f"{self.value}"
+        if self.label:
+            label += f" ({self.label})"
+        elif self.platform:
+            label += f" ({self.platform})"
+        return label
+
+    def get_channel_list(self):
+        return [c.channel for c in self.channels.all()]
+

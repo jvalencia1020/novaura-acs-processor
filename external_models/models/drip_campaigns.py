@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import timedelta
 from .nurturing_campaign_base import CampaignScheduleBase, CampaignProgressBase
+from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
 
 
 class DripCampaignMessageStep(models.Model):
@@ -28,14 +29,11 @@ class DripCampaignMessageStep(models.Model):
         help_text="Unit of time for the delay"
     )
     
-    template = models.ForeignKey(
-        'MessageTemplate',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='drip_message_steps'
-    )
-    content = models.TextField(blank=True, null=True, help_text="Custom message body")
+    # Channel config relationships
+    email_config = models.OneToOneField(EmailConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    sms_config = models.OneToOneField(SMSConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    voice_config = models.OneToOneField(VoiceConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    chat_config = models.OneToOneField(ChatConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
 
     class Meta:
         managed = False
@@ -57,8 +55,67 @@ class DripCampaignMessageStep(models.Model):
 
     def clean(self):
         super().clean()
-        if not self.template and not self.content:
-            raise ValidationError("Either template or content must be provided")
+        
+        # Get the active channel config
+        channel_config = self.get_channel_config()
+        
+        # Check that at least one channel config is provided
+        if not any([self.email_config, self.sms_config, self.voice_config, self.chat_config]):
+            raise ValidationError("At least one channel config must be provided")
+        
+        # Check that only one channel config is provided
+        configs = [self.email_config, self.sms_config, self.voice_config, self.chat_config]
+        if sum(1 for config in configs if config is not None) > 1:
+            raise ValidationError("Only one channel config can be provided per step")
+        
+        # For drip campaigns, content is in the channel config
+        if not self.template and not (channel_config and hasattr(channel_config, 'content') and channel_config.content):
+            raise ValidationError("Either template or channel config content must be provided")
+
+    def get_channel_config(self):
+        """Get the active channel config for this step"""
+        if self.email_config:
+            return self.email_config
+        elif self.sms_config:
+            return self.sms_config
+        elif self.voice_config:
+            return self.voice_config
+        elif self.chat_config:
+            return self.chat_config
+        return None
+
+    def delete(self, *args, **kwargs):
+        """Override delete to ensure channel configs are deleted"""
+        # Delete associated channel configs
+        if self.email_config:
+            try:
+                self.email_config.delete()
+            except Exception as e:
+                raise Exception(f"Error deleting email config: {str(e)}")
+                
+        if self.sms_config:
+            try:
+                self.sms_config.delete()
+            except Exception as e:
+                raise Exception(f"Error deleting SMS config: {str(e)}")
+                
+        if self.voice_config:
+            try:
+                self.voice_config.delete()
+            except Exception as e:
+                raise Exception(f"Error deleting voice config: {str(e)}")
+                
+        if self.chat_config:
+            try:
+                self.chat_config.delete()
+            except Exception as e:
+                raise Exception(f"Error deleting chat config: {str(e)}")
+        
+        try:
+            # Call the parent delete method
+            super().delete(*args, **kwargs)
+        except Exception as e:
+            raise Exception(f"Error deleting step: {str(e)}")
 
 
 class DripCampaignSchedule(CampaignScheduleBase):

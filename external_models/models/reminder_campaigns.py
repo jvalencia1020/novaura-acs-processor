@@ -2,6 +2,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from .nurturing_campaign_base import CampaignScheduleBase, CampaignProgressBase
+from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
 
 
 class ReminderCampaignSchedule(CampaignScheduleBase):
@@ -145,6 +146,45 @@ class ReminderTime(models.Model):
             return f"Reminder {' '.join(parts)} before appointment"
         else:
             return f"Reminder {self.days_before} days before at {self.time}"
+
+
+class ReminderMessage(models.Model):
+    """Individual messages for a reminder time"""
+    reminder_time = models.ForeignKey(ReminderTime, on_delete=models.CASCADE, related_name='messages')
+    template = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Channel configuration fields
+    email_config = models.ForeignKey(EmailConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='reminder_messages')
+    sms_config = models.ForeignKey(SMSConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='reminder_messages')
+    voice_config = models.ForeignKey(VoiceConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='reminder_messages')
+    chat_config = models.ForeignKey(ChatConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='reminder_messages')
+
+    class Meta:
+        managed = False
+        db_table = 'acs_remindermessage'
+
+    def clean(self):
+        """Validate that exactly one channel config is set"""
+        configs = [
+            self.email_config,
+            self.sms_config,
+            self.voice_config,
+            self.chat_config
+        ]
+        if sum(1 for config in configs if config is not None) != 1:
+            raise ValidationError("Exactly one channel configuration must be set")
+
+    def __str__(self):
+        channel = next(
+            (name for name, config in [
+                ('Email', self.email_config),
+                ('SMS', self.sms_config),
+                ('Voice', self.voice_config),
+                ('Chat', self.chat_config)
+            ] if config is not None),
+            'Unknown'
+        )
+        return f"{channel} Message for {self.reminder_time}"
 
 
 class ReminderCampaignProgress(CampaignProgressBase):

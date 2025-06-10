@@ -9,7 +9,11 @@ from .journeys import JourneyEvent
 from .blast_campaigns import BlastCampaignProgress
 from .drip_campaigns import DripCampaignProgress
 from .reminder_campaigns import ReminderCampaignProgress
+from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
 from bulkcampaign_processor.utils.variable_replacement import replace_variables
+import logging
+
+logger = logging.getLogger(__name__)
 
 class LeadNurturingCampaign(models.Model):
     CAMPAIGN_TYPES = [
@@ -84,63 +88,6 @@ class LeadNurturingCampaign(models.Model):
         """
     )
     
-    config = models.JSONField(
-        blank=True, 
-        null=True,
-        help_text="""
-        Additional configuration for the campaign:
-        - For all campaigns: {
-            "track_opens": true,
-            "track_clicks": true,
-            "track_replies": true,
-            "track_delivery": true,
-            "allow_opt_out": true,
-            "opt_out_message": "Reply STOP to unsubscribe"
-          }
-        - For email campaigns: {
-            "from_email": "sender@example.com",
-            "from_name": "Sender Name",
-            "reply_to": "reply@example.com",
-            "priority": "high|normal|low",
-            "attachments": [
-                {
-                    "name": "file.pdf",
-                    "url": "https://..."
-                }
-            ]
-          }
-        - For SMS campaigns: {
-            "from_number": "+1234567890",
-            "priority": "high|normal|low",
-            "media_urls": ["https://..."]
-          }
-        - For voice campaigns: {
-            "from_number": "+1234567890",
-            "voice": "male|female",
-            "language": "en-US",
-            "retry_attempts": 3,
-            "retry_delay": 300,
-            "record_call": true,
-            "call_timeout": 60,
-            "machine_detection": "true|false|prefer_human"
-          }
-        - For chat campaigns: {
-            "platform": "whatsapp|messenger|telegram",
-            "priority": "high|normal|low",
-            "media_urls": ["https://..."],
-            "quick_replies": [
-                {
-                    "text": "Yes",
-                    "value": "yes"
-                },
-                {
-                    "text": "No",
-                    "value": "no"
-                }
-            ]
-          }
-        """
-    )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -162,6 +109,12 @@ class LeadNurturingCampaign(models.Model):
     )
     content = models.TextField(blank=True, null=True)
     crm_campaign = models.ForeignKey(Campaign, on_delete=models.SET_NULL, null=True, blank=True, related_name='nurturing_campaigns')
+
+    # OneToOne fields for the shared channel config models
+    email_config = models.OneToOneField(EmailConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    sms_config = models.OneToOneField(SMSConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    voice_config = models.OneToOneField(VoiceConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    chat_config = models.OneToOneField(ChatConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
 
     class Meta:
         managed = False
@@ -372,66 +325,28 @@ class LeadNurturingCampaign(models.Model):
         Returns:
             str: Content with variables replaced with their values
         """
-        # If using a template, use its replace_variables method
-        if self.template:
-            return self.template.replace_variables(context)
+        # Get the appropriate channel config based on campaign channel
+        channel_config = None
+        if self.channel == 'email' and self.email_config:
+            channel_config = self.email_config
+        elif self.channel == 'sms' and self.sms_config:
+            channel_config = self.sms_config
+        elif self.channel == 'voice' and self.voice_config:
+            channel_config = self.voice_config
+        elif self.channel == 'chat' and self.chat_config:
+            channel_config = self.chat_config
             
-        # If using direct content, process it here
-        if not self.content:
+        if not channel_config:
+            logger.error(f"No channel config found for campaign {self.id}")
             return ""
             
-        content = self.content
-        
-        # Get all active variables
-        from external_models.models.messages import TemplateVariable
-        variables = TemplateVariable.objects.filter(
-            category__is_active=True,
-            is_active=True
-        ).select_related('category')
-        
-        # Replace each variable
-        for var in variables:
-            placeholder = var.get_placeholder()
-            if placeholder in content:
-                category = var.category.name
-                if category == 'system':
-                    # Handle system variables
-                    if var.name == 'current_date':
-                        value = timezone.now().strftime('%Y-%m-%d')
-                    elif var.name == 'current_time':
-                        value = timezone.now().strftime('%I:%M %p')
-                else:
-                    # Get value from context using the model and field information
-                    model_data = context.get(category, {})
-                    if isinstance(model_data, dict):
-                        value = model_data.get(var.name, '')
-                    else:
-                        # If model_data is an actual model instance
-                        value = getattr(model_data, var.field_name, '')
-                
-                content = content.replace(placeholder, str(value))
-        
-        return content
-
-class CampaignScheduleBase(models.Model):
-    """Base model for campaign scheduling"""
-    business_hours_only = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
-        managed = False
-
-class CampaignProgressBase(models.Model):
-    """Base model for campaign progress tracking"""
-    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
-        managed = False
+        # Use template if available, otherwise use content
+        if channel_config.template:
+            return channel_config.template.replace_variables(context)
+        elif channel_config.content:
+            return replace_variables(channel_config.content, context)
+            
+        return ""
 
 class BulkCampaignMessage(models.Model):
     STATUS_CHOICES = [
@@ -460,7 +375,7 @@ class BulkCampaignMessage(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # New fields for drip campaign message steps
+    # Fields for drip campaign message steps
     drip_message_step = models.ForeignKey(
         'DripCampaignMessageStep',
         on_delete=models.SET_NULL,
@@ -475,6 +390,16 @@ class BulkCampaignMessage(models.Model):
         help_text="The order of the message step in the drip sequence"
     )
 
+    # New field for reminder campaign messages
+    reminder_message = models.ForeignKey(
+        'ReminderMessage',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bulk_messages',
+        help_text="The reminder message configuration for this message (for reminder campaigns)"
+    )
+
     class Meta:
         managed = False
         db_table = 'bulk_campaign_message'
@@ -485,6 +410,7 @@ class BulkCampaignMessage(models.Model):
             models.Index(fields=['scheduled_for']),
             models.Index(fields=['drip_message_step']),
             models.Index(fields=['step_order']),
+            models.Index(fields=['reminder_message']),
         ]
 
     def __str__(self):
@@ -545,16 +471,62 @@ class BulkCampaignMessage(models.Model):
         }
 
         if self.campaign.campaign_type == 'drip' and self.drip_message_step:
-            # For drip campaigns, use the content from the message step
-            if self.drip_message_step.template:
-                return self.drip_message_step.template.replace_variables(context)
-            # For direct content in message step, use the utility function
-            return replace_variables(self.drip_message_step.content, context)
-        elif self.campaign.template:
-            # For other campaign types, use the campaign template
-            return self.campaign.template.replace_variables(context)
-        # For direct content in campaign, use the utility function
-        return replace_variables(self.campaign.content, context)
+            # Get the channel config for the message step
+            channel_config = self.drip_message_step.get_channel_config()
+            if not channel_config:
+                logger.error(f"No channel config found for drip message step {self.drip_message_step.id}")
+                return ""
+                
+            # Use template if available, otherwise use content
+            if channel_config.template:
+                return channel_config.template.replace_variables(context)
+            elif channel_config.content:
+                return replace_variables(channel_config.content, context)
+                
+        elif self.campaign.campaign_type == 'reminder' and self.reminder_message:
+            # Get the channel config for the reminder message
+            channel_config = None
+            if campaign.channel == 'email' and self.reminder_message.email_config:
+                channel_config = self.reminder_message.email_config
+            elif campaign.channel == 'sms' and self.reminder_message.sms_config:
+                channel_config = self.reminder_message.sms_config
+            elif campaign.channel == 'voice' and self.reminder_message.voice_config:
+                channel_config = self.reminder_message.voice_config
+            elif campaign.channel == 'chat' and self.reminder_message.chat_config:
+                channel_config = self.reminder_message.chat_config
+                
+            if not channel_config:
+                logger.error(f"No channel config found for reminder message {self.reminder_message.id}")
+                return ""
+                
+            # Use template if available, otherwise use content
+            if channel_config.template:
+                return channel_config.template.replace_variables(context)
+            elif channel_config.content:
+                return replace_variables(channel_config.content, context)
+                
+        # For other campaign types, get the appropriate channel config
+        channel_config = None
+        if campaign.channel == 'email' and campaign.email_config:
+            channel_config = campaign.email_config
+        elif campaign.channel == 'sms' and campaign.sms_config:
+            channel_config = campaign.sms_config
+        elif campaign.channel == 'voice' and campaign.voice_config:
+            channel_config = campaign.voice_config
+        elif campaign.channel == 'chat' and campaign.chat_config:
+            channel_config = campaign.chat_config
+            
+        if not channel_config:
+            logger.error(f"No channel config found for campaign {campaign.id}")
+            return ""
+            
+        # Use template if available, otherwise use content
+        if channel_config.template:
+            return channel_config.template.replace_variables(context)
+        elif channel_config.content:
+            return replace_variables(channel_config.content, context)
+            
+        return ""
 
 class LeadNurturingParticipant(models.Model):
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='lead_nurturing_participations')
