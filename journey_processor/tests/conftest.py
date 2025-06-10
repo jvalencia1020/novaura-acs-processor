@@ -275,6 +275,114 @@ def create_test_tables():
             )
         """)
 
+        # Create asc_messagetemplate table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS asc_messagetemplate (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                template_type VARCHAR(20) NOT NULL,
+                subject VARCHAR(255),
+                content TEXT NOT NULL,
+                variables JSON,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_by_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by_id) REFERENCES accounts_user (id)
+            )
+        """)
+
+        # Create acs_emailconfig table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS acs_emailconfig (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT,
+                template_id INTEGER,
+                subject VARCHAR(255),
+                from_endpoint_id INTEGER,
+                from_name VARCHAR(255),
+                reply_to VARCHAR(254),
+                priority VARCHAR(10),
+                track_opens BOOLEAN DEFAULT FALSE,
+                track_clicks BOOLEAN DEFAULT FALSE,
+                attachments JSON,
+                FOREIGN KEY (template_id) REFERENCES asc_messagetemplate (id),
+                FOREIGN KEY (from_endpoint_id) REFERENCES contact_endpoint (id)
+            )
+        """)
+
+        # Create acs_smsconfig table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS acs_smsconfig (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT,
+                template_id INTEGER,
+                from_endpoint_id INTEGER,
+                priority VARCHAR(10),
+                track_delivery BOOLEAN DEFAULT FALSE,
+                track_replies BOOLEAN DEFAULT FALSE,
+                media_urls JSON,
+                FOREIGN KEY (template_id) REFERENCES asc_messagetemplate (id),
+                FOREIGN KEY (from_endpoint_id) REFERENCES contact_endpoint (id)
+            )
+        """)
+
+        # Create acs_voiceconfig table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS acs_voiceconfig (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT,
+                template_id INTEGER,
+                from_endpoint_id INTEGER,
+                voice VARCHAR(10),
+                language VARCHAR(20),
+                priority VARCHAR(10),
+                retry_attempts INTEGER,
+                retry_delay INTEGER,
+                record_call BOOLEAN DEFAULT FALSE,
+                call_timeout INTEGER,
+                machine_detection VARCHAR(20),
+                FOREIGN KEY (template_id) REFERENCES asc_messagetemplate (id),
+                FOREIGN KEY (from_endpoint_id) REFERENCES contact_endpoint (id)
+            )
+        """)
+
+        # Create acs_chatconfig table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS acs_chatconfig (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT,
+                template_id INTEGER,
+                from_endpoint_id INTEGER,
+                platform VARCHAR(20),
+                priority VARCHAR(10),
+                track_delivery BOOLEAN DEFAULT FALSE,
+                track_read BOOLEAN DEFAULT FALSE,
+                media_urls JSON,
+                quick_replies JSON,
+                FOREIGN KEY (template_id) REFERENCES asc_messagetemplate (id),
+                FOREIGN KEY (from_endpoint_id) REFERENCES contact_endpoint (id)
+            )
+        """)
+
+        # Create contact_endpoint table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS contact_endpoint (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                value VARCHAR(255) NOT NULL,
+                platform VARCHAR(50),
+                label VARCHAR(100),
+                priority VARCHAR(10) DEFAULT 'primary',
+                is_primary BOOLEAN DEFAULT FALSE,
+                is_verified BOOLEAN DEFAULT FALSE,
+                account_id INTEGER,
+                campaign_id INTEGER,
+                FOREIGN KEY (account_id) REFERENCES account (id),
+                FOREIGN KEY (campaign_id) REFERENCES campaign (id)
+            )
+        """)
+
         # Create acs_leadnurturingcampaign table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS acs_leadnurturingcampaign (
@@ -301,30 +409,20 @@ def create_test_tables():
                 template_id INTEGER,
                 content TEXT,
                 crm_campaign_id INTEGER,
+                email_config_id INTEGER,
+                sms_config_id INTEGER,
+                voice_config_id INTEGER,
+                chat_config_id INTEGER,
                 FOREIGN KEY (account_id) REFERENCES account (id),
                 FOREIGN KEY (journey_id) REFERENCES journey (id),
                 FOREIGN KEY (status_changed_by_id) REFERENCES accounts_user (id),
                 FOREIGN KEY (created_by_id) REFERENCES accounts_user (id),
                 FOREIGN KEY (template_id) REFERENCES asc_messagetemplate (id),
-                FOREIGN KEY (crm_campaign_id) REFERENCES campaign (id)
-            )
-        """)
-
-        # Create asc_messagetemplate table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS asc_messagetemplate (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name VARCHAR(255) NOT NULL,
-                description TEXT,
-                template_type VARCHAR(20) NOT NULL,
-                subject VARCHAR(255),
-                content TEXT NOT NULL,
-                variables JSON,
-                is_active BOOLEAN DEFAULT TRUE,
-                created_by_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (created_by_id) REFERENCES accounts_user (id)
+                FOREIGN KEY (crm_campaign_id) REFERENCES campaign (id),
+                FOREIGN KEY (email_config_id) REFERENCES acs_emailconfig (id),
+                FOREIGN KEY (sms_config_id) REFERENCES acs_smsconfig (id),
+                FOREIGN KEY (voice_config_id) REFERENCES acs_voiceconfig (id),
+                FOREIGN KEY (chat_config_id) REFERENCES acs_chatconfig (id)
             )
         """)
 
@@ -342,6 +440,11 @@ def setup_test_database():
         cursor.execute("DROP TABLE IF EXISTS acs_leadnurturingcampaign")
         cursor.execute("DROP TABLE IF EXISTS journey_step")
         cursor.execute("DROP TABLE IF EXISTS journey")
+        cursor.execute("DROP TABLE IF EXISTS acs_emailconfig")
+        cursor.execute("DROP TABLE IF EXISTS acs_smsconfig")
+        cursor.execute("DROP TABLE IF EXISTS acs_voiceconfig")
+        cursor.execute("DROP TABLE IF EXISTS acs_chatconfig")
+        cursor.execute("DROP TABLE IF EXISTS contact_endpoint")
         cursor.execute("DROP TABLE IF EXISTS asc_messagetemplate")
         cursor.execute("DROP TABLE IF EXISTS lead")
         cursor.execute("DROP TABLE IF EXISTS lead_status")

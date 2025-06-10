@@ -7,7 +7,7 @@ from external_models.models import (
     Journey, JourneyStep, JourneyStepConnection,
     JourneyEvent, LeadNurturingParticipant,
     Account, Campaign, Funnel, Lead,
-    LeadNurturingCampaign
+    LeadNurturingCampaign, EmailConfig
 )
 from journey_processor.services.journey_processor import JourneyProcessor
 
@@ -39,6 +39,16 @@ def create_test_journey(account, user):
         start_date=timezone.now()
     )
 
+    # Create email config for the nurturing campaign
+    email_config = EmailConfig.objects.create(
+        content="Test email content",
+        subject="Test Subject",
+        from_name="Test Sender",
+        priority="normal",
+        track_opens=True,
+        track_clicks=True
+    )
+
     # Create the nurturing campaign
     nurturing_campaign = LeadNurturingCampaign.objects.create(
         account=account,
@@ -49,7 +59,8 @@ def create_test_journey(account, user):
         status='active',
         active=True,
         start_date=timezone.now(),
-        created_by=user
+        created_by=user,
+        email_config=email_config
     )
 
     # Create steps
