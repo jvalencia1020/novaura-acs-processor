@@ -4,16 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/deploy-local.sh" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/communications.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/communications.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/drip_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/drip_campaigns.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/reminder_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/reminder_campaigns.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-    </list>
+    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

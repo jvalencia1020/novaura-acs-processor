@@ -47,6 +47,9 @@ from .nurturing_campaign_base import (
     CampaignProgressBase
 )
 
+from .accounts import User
+from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
+
 
 __all__ = [
     # Nurturing Campaigns
@@ -89,4 +92,13 @@ __all__ = [
     'Funnel',
     'Step',
     'Lead',
+
+    # Accounts
+    'User',
+
+    # Channel Configs
+    'EmailConfig',
+    'SMSConfig',
+    'VoiceConfig',
+    'ChatConfig',
 ]
