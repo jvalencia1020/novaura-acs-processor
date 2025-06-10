@@ -750,6 +750,15 @@ class BulkCampaignProcessor:
                     last_message_timestamp=timezone.now()
                 )
 
+                # Create conversation for the message
+                conversation = Conversation.objects.create(
+                    twilio_sid=twilio_message.sid,  # Use the message SID as conversation SID
+                    lead=lead,
+                    channel='sms',
+                    state='active',
+                    created_by=campaign.created_by
+                )
+
                 # Create thread message
                 ThreadMessage.objects.create(
                     thread=thread,
@@ -760,12 +769,15 @@ class BulkCampaignProcessor:
                     user=campaign.created_by,
                     twilio_message=ConversationMessage.objects.create(
                         message_sid=twilio_message.sid,
-                        conversation=None,  # Not using conversations API for direct messages
+                        conversation=conversation,  # Link to the conversation
                         body=processed_content,
                         direction='outbound',
                         channel='sms'
                     )
                 )
+
+                # Update message status to sent
+                message.update_status('sent')
 
                 return True
 
