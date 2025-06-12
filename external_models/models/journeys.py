@@ -6,6 +6,152 @@ import pytz
 from datetime import timedelta
 from .external_references import Account, Campaign, Funnel, Step
 from .nurturing_campaign_base import CampaignScheduleBase
+from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
+
+class EventCategory(models.Model):
+    """Model for categorizing journey events"""
+    name = models.CharField(max_length=50, unique=True)
+    description = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'event_category'
+        verbose_name_plural = 'Event Categories'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def get_default_categories(cls):
+        """Create default event categories if they don't exist"""
+        default_categories = [
+            ('message', 'Events related to message delivery and interaction'),
+            ('conversation', 'Events related to conversation flow and engagement'),
+            ('schedule', 'Events related to scheduling and timing'),
+            ('system', 'Events related to system operations and state changes'),
+            ('custom', 'Custom events defined by users')
+        ]
+        
+        for name, description in default_categories:
+            cls.objects.get_or_create(
+                name=name,
+                defaults={'description': description}
+            )
+
+class EventType(models.Model):
+    """Model for defining journey event types"""
+    name = models.CharField(max_length=100, unique=True)
+    category = models.ForeignKey(EventCategory, on_delete=models.CASCADE, related_name='event_types')
+    description = models.TextField(blank=True, null=True)
+    is_custom = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_event_types'
+    )
+
+    class Meta:
+        db_table = 'event_type'
+        ordering = ['category', 'name']
+
+    def __str__(self):
+        return f"{self.name} ({self.category.name})"
+
+    def clean(self):
+        """Validate event type configuration"""
+        super().clean()
+        if self.is_custom and not self.name.startswith('custom_'):
+            raise ValidationError("Custom event types must start with 'custom_'")
+
+    @classmethod
+    def get_default_event_types(cls):
+        """Create default event types if they don't exist"""
+        default_types = {
+            'message': [
+                ('message_sent', 'Message was sent to the participant'),
+                ('message_delivered', 'Message was delivered to the participant'),
+                ('message_read', 'Message was read by the participant'),
+                ('message_failed', 'Message delivery failed'),
+                ('message_bounced', 'Message bounced back'),
+                ('message_clicked', 'Message link was clicked'),
+                ('message_opened', 'Message was opened')
+            ],
+            'conversation': [
+                ('conversation_started', 'Conversation was initiated'),
+                ('conversation_ended', 'Conversation was completed'),
+                ('conversation_paused', 'Conversation was paused'),
+                ('conversation_resumed', 'Conversation was resumed'),
+                ('response_received', 'Response was received from participant'),
+                ('no_response', 'No response received within timeout'),
+                ('response_timeout', 'Response timeout occurred')
+            ],
+            'schedule': [
+                ('business_hours_start', 'Business hours started'),
+                ('business_hours_end', 'Business hours ended'),
+                ('after_hours_start', 'After hours started'),
+                ('after_hours_end', 'After hours ended'),
+                ('holiday_start', 'Holiday period started'),
+                ('holiday_end', 'Holiday period ended'),
+                ('timezone_change', 'Timezone was changed')
+            ],
+            'system': [
+                ('step_entered', 'Step was entered'),
+                ('step_exited', 'Step was exited'),
+                ('condition_met', 'Condition was met'),
+                ('condition_not_met', 'Condition was not met'),
+                ('error_occurred', 'Error occurred during processing'),
+                ('retry_attempted', 'Retry was attempted'),
+                ('max_retries_reached', 'Maximum retries were reached')
+            ]
+        }
+
+        # Ensure categories exist
+        EventCategory.get_default_categories()
+
+        # Create event types
+        for category_name, types in default_types.items():
+            category = EventCategory.objects.get(name=category_name)
+            for type_name, description in types:
+                cls.objects.get_or_create(
+                    name=type_name,
+                    category=category,
+                    defaults={'description': description}
+                )
+
+    @classmethod
+    def create_custom_type(cls, name, category, description=None, created_by=None):
+        """
+        Create a new custom event type
+        
+        Args:
+            name: Name of the event type
+            category: EventCategory instance or name
+            description: Optional description
+            created_by: User creating the event type
+            
+        Returns:
+            EventType: The created event type
+        """
+        if isinstance(category, str):
+            category = EventCategory.objects.get(name=category)
+            
+        custom_name = f"custom_{name.lower().replace(' ', '_')}"
+        
+        return cls.objects.create(
+            name=custom_name,
+            category=category,
+            description=description,
+            is_custom=True,
+            created_by=created_by
+        )
 
 class Journey(models.Model):
     account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='journeys')
@@ -76,82 +222,11 @@ class JourneyStep(models.Model):
         related_name='journey_steps',
         help_text="Optional template for communication steps (email, SMS, voice, chat)"
     )
-    config = models.JSONField(
-        blank=True,
-        null=True,
-        help_text="""
-        Configuration for different step types:
-        - Email: {
-            "content": "Direct message content if no template",
-            "channel_specific_settings": {
-                "subject": "Email subject",
-                "from_email": "sender@example.com",
-                "from_name": "Sender Name",
-                "reply_to": "reply@example.com",
-                "priority": "high|normal|low",
-                "track_opens": true,
-                "track_clicks": true,
-                "attachments": [
-                    {
-                        "name": "file.pdf",
-                        "url": "https://..."
-                    }
-                ]
-            }
-          }
-        - SMS: {
-            "content": "Direct message content if no template",
-            "channel_specific_settings": {
-                "from_number": "+1234567890",
-                "priority": "high|normal|low",
-                "track_delivery": true,
-                "track_replies": true,
-                "media_urls": [
-                    "https://..."
-                ]
-            }
-          }
-        - Voice: {
-            "content": "Direct message content if no template",
-            "channel_specific_settings": {
-                "from_number": "+1234567890",
-                "voice": "male|female",
-                "language": "en-US",
-                "priority": "high|normal|low",
-                "retry_attempts": 3,
-                "retry_delay": 300,
-                "record_call": true,
-                "call_timeout": 60,
-                "machine_detection": "true|false|prefer_human"
-            }
-          }
-        - Chat: {
-            "content": "Direct message content if no template",
-            "channel_specific_settings": {
-                "platform": "whatsapp|messenger|telegram",
-                "priority": "high|normal|low",
-                "track_delivery": true,
-                "track_read": true,
-                "media_urls": [
-                    "https://..."
-                ],
-                "quick_replies": [
-                    {
-                        "text": "Yes",
-                        "value": "yes"
-                    },
-                    {
-                        "text": "No",
-                        "value": "no"
-                    }
-                ]
-            }
-          }
-        - Wait Step: {"duration": 3600, "unit": "seconds"}
-        - Validation Step: {"validation_type": "field_check", "fields": ["field1", "field2"]}
-        - Webhook: {"url": "https://...", "method": "POST", "headers": {...}}
-        """
-    )
+    # New config relations (nullable, only one should be set per step)
+    email_config = models.OneToOneField(EmailConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    sms_config = models.OneToOneField(SMSConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    voice_config = models.OneToOneField(VoiceConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    chat_config = models.OneToOneField(ChatConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     is_entry_point = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -172,17 +247,17 @@ class JourneyStep(models.Model):
 
         # For communication steps, either template or direct content in config is required
         if self.step_type in ['email', 'sms', 'voice', 'chat']:
-            if not self.template and not self.config.get('content'):
+            if not self.template and not self.email_config and not self.sms_config and not self.voice_config and not self.chat_config:
                 raise ValidationError(
                     f"{self.step_type.title()} steps must have either a template or direct content in config"
                 )
 
         # Other validations
-        if self.step_type == 'wait_step' and not self.config.get('duration'):
+        if self.step_type == 'wait_step' and not self.email_config and not self.sms_config and not self.voice_config and not self.chat_config:
             raise ValidationError("Wait steps must have a duration in config")
-        if self.step_type == 'validation_step' and not self.config.get('validation_type'):
+        if self.step_type == 'validation_step' and not self.email_config and not self.sms_config and not self.voice_config and not self.chat_config:
             raise ValidationError("Validation steps must have a validation_type in config")
-        if self.step_type == 'webhook' and not self.config.get('url'):
+        if self.step_type == 'webhook' and not self.email_config and not self.sms_config and not self.voice_config and not self.chat_config:
             raise ValidationError("Webhook steps must have a URL in config")
 
 class JourneyStepConnection(models.Model):
@@ -193,24 +268,6 @@ class JourneyStepConnection(models.Model):
         ('event', 'Event Based'),
         ('condition', 'Condition Met'),
         ('manual', 'Manual Trigger'),
-    ]
-
-    EVENT_TYPES = [
-        ('email_opened', 'Email Opened'),
-        ('email_clicked', 'Email Clicked'),
-        ('sms_delivered', 'SMS Delivered'),
-        ('sms_replied', 'SMS Replied'),
-        ('form_submitted', 'Form Submitted'),
-        ('page_visited', 'Page Visited'),
-        ('button_clicked', 'Button Clicked'),
-        ('link_clicked', 'Link Clicked'),
-        ('appointment_scheduled', 'Appointment Scheduled'),
-        ('appointment_cancelled', 'Appointment Cancelled'),
-        ('appointment_completed', 'Appointment Completed'),
-        ('lead_created', 'Lead Created'),
-        ('lead_updated', 'Lead Updated'),
-        ('lead_converted', 'Lead Converted'),
-        ('custom_event', 'Custom Event'),
     ]
 
     CONDITION_TYPES = [
@@ -265,12 +322,13 @@ class JourneyStepConnection(models.Model):
         related_name='journey_connections'
     )
 
-    # For event-based triggers
-    event_type = models.CharField(
-        max_length=100,
-        choices=EVENT_TYPES,
+    # For event-based triggers - now using EventType model
+    event_type = models.ForeignKey(
+        EventType,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
+        related_name='trigger_connections',
         help_text="Type of event that triggers this connection"
     )
 
@@ -330,6 +388,8 @@ class JourneyStepConnection(models.Model):
             trigger_info = f" (after {self.delay_duration} {self.delay_unit})"
         elif self.trigger_type == 'funnel_change':
             trigger_info = f" (on funnel step: {self.funnel_step})"
+        elif self.trigger_type == 'event':
+            trigger_info = f" (on event: {self.event_type.name})"
         elif self.trigger_type == 'condition':
             trigger_info = f" (if: {self.condition_label})"
 
@@ -359,8 +419,11 @@ class JourneyStepConnection(models.Model):
             raise ValidationError("Funnel step is required for funnel change triggers")
 
         # Validate event settings
-        if self.trigger_type == 'event' and not self.event_type:
-            raise ValidationError("Event type is required for event-based triggers")
+        if self.trigger_type == 'event':
+            if not self.event_type:
+                raise ValidationError("Event type is required for event-based triggers")
+            if not self.event_type.is_active:
+                raise ValidationError(f"Event type {self.event_type.name} is not active")
 
         # Validate condition settings
         if self.trigger_type == 'condition':
@@ -411,7 +474,7 @@ class JourneyStepConnection(models.Model):
             # Check if enough time has passed since the participant entered this step
             last_entered_event = participant.events.filter(
                 journey_step=self.from_step,
-                event_type='enter_step'
+                event_type__name='step_entered'
             ).order_by('-event_timestamp').first()
 
             if not last_entered_event:
@@ -425,13 +488,17 @@ class JourneyStepConnection(models.Model):
         elif self.trigger_type == 'funnel_change':
             # Check if the participant's lead has moved to the specified funnel step
             return (
-                    participant.lead.current_step == self.funnel_step and
-                    event and event.get('type') == 'funnel_step_changed'
+                participant.lead.current_step == self.funnel_step and
+                event and event.get('type') == 'funnel_step_changed'
             )
 
         elif self.trigger_type == 'event':
             # Check if the right event occurred
-            return event and event.get('type') == self.event_type
+            return (
+                event and 
+                event.get('type') == self.event_type.name and
+                self.event_type.is_active
+            )
 
         elif self.trigger_type == 'condition':
             # Evaluate the condition against the participant/lead
@@ -540,26 +607,22 @@ class JourneyStepConnection(models.Model):
 class JourneyEvent(models.Model):
     participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='events')
     journey_step = models.ForeignKey('JourneyStep', on_delete=models.CASCADE, related_name='events')
-    event_type = models.CharField(
-        max_length=50,
-        choices=[
-            ('enter_step', 'Entered Step'),
-            ('exit_step', 'Exited Step'),
-            ('action_sent', 'Action Sent'),
-            ('action_delivered', 'Action Delivered'),
-            ('action_opened', 'Action Opened'),
-            ('action_clicked', 'Action Clicked'),
-            ('condition_met', 'Condition Met'),
-            ('condition_not_met', 'Condition Not Met'),
-            ('error', 'Error'),
-        ]
-    )
+    
+    # Event type and category
+    event_type = models.ForeignKey(EventType, on_delete=models.PROTECT, related_name='events')
+    
+    # Event metadata
     event_timestamp = models.DateTimeField(auto_now_add=True)
     metadata = models.JSONField(blank=True, null=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='created_journey_events')
+    
+    # Analytics fields
+    processing_time = models.DurationField(null=True, blank=True)
+    success = models.BooleanField(default=True)
+    error_message = models.TextField(blank=True, null=True)
+    retry_count = models.PositiveIntegerField(default=0)
 
     class Meta:
-        managed = False
         db_table = 'journey_event'
         indexes = [
             models.Index(fields=['event_type']),
@@ -567,7 +630,68 @@ class JourneyEvent(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.event_type} - {self.participant.lead} @ {self.journey_step.name}"
+        return f"{self.event_type.name} - {self.participant.lead} @ {self.journey_step.name}"
+
+    def clean(self):
+        """Validate event configuration"""
+        super().clean()
+        if not self.event_type.is_active:
+            raise ValidationError(f"Event type {self.event_type.name} is not active")
+
+    @classmethod
+    def create_custom_event(cls, participant, journey_step, event_name, category='custom', description=None, metadata=None, created_by=None):
+        """
+        Create a custom event with the given name and description
+        
+        Args:
+            participant: LeadNurturingParticipant instance
+            journey_step: JourneyStep instance
+            event_name: Name of the custom event
+            category: Category name or instance
+            description: Optional description of the event
+            metadata: Optional metadata for the event
+            created_by: User who created the event
+            
+        Returns:
+            JourneyEvent: The created custom event
+        """
+        event_type = EventType.create_custom_type(
+            name=event_name,
+            category=category,
+            description=description,
+            created_by=created_by
+        )
+        
+        return cls.objects.create(
+            participant=participant,
+            journey_step=journey_step,
+            event_type=event_type,
+            metadata=metadata,
+            created_by=created_by
+        )
+
+    def add_metadata(self, key, value):
+        """Add or update metadata for the event"""
+        if not self.metadata:
+            self.metadata = {}
+        self.metadata[key] = value
+        self.save(update_fields=['metadata'])
+
+    def mark_as_failed(self, error_message):
+        """Mark the event as failed with an error message"""
+        self.success = False
+        self.error_message = error_message
+        self.save(update_fields=['success', 'error_message'])
+
+    def increment_retry_count(self):
+        """Increment the retry count for this event"""
+        self.retry_count += 1
+        self.save(update_fields=['retry_count'])
+
+    def set_processing_time(self, start_time):
+        """Set the processing time for this event"""
+        self.processing_time = timezone.now() - start_time
+        self.save(update_fields=['processing_time'])
 
 class JourneyCampaignSchedule(CampaignScheduleBase):
     """Schedule settings for journey-based campaigns"""

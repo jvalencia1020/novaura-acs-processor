@@ -42,6 +42,8 @@ import time
 from twilio.http import HttpClient
 from twilio.base.exceptions import TwilioRestException
 
+from shared_services.message_delivery import MessageDeliveryService
+
 logger = logging.getLogger(__name__)
 
 class BulkCampaignProcessor:
@@ -56,6 +58,7 @@ class BulkCampaignProcessor:
             'reminder': self._process_reminder_campaign,
             'blast': self._process_blast_campaign
         }
+        self.message_delivery = MessageDeliveryService()
 
     def process_campaign(self, campaign):
         """
@@ -532,18 +535,33 @@ class BulkCampaignProcessor:
                 logger.debug(f"Cannot send message {message.id} - campaign or participant not active")
                 return False
 
-            # Send message based on channel
-            if campaign.channel == 'email':
-                success = self._send_email(message)
-            elif campaign.channel == 'sms':
-                success = self._send_sms(message)
-            elif campaign.channel == 'voice':
-                success = self._send_voice(message)
-            elif campaign.channel == 'chat':
-                success = self._send_chat(message)
-            else:
-                logger.error(f"Unsupported channel: {campaign.channel}")
-                return False
+            # Get message content
+            processed_content = message.get_message_content()
+
+            # Get service phone number for SMS/Voice
+            service_phone = None
+            if campaign.channel in ['sms', 'voice']:
+                if campaign.campaign_type == 'drip' and message.drip_message_step:
+                    service_phone = message.drip_message_step.sms_config.get_from_number()
+                elif campaign.campaign_type == 'reminder' and message.reminder_message:
+                    service_phone = message.reminder_message.sms_config.get_from_number()
+                else:
+                    service_phone = campaign.sms_config.get_from_number()
+
+            # For opt-out messages, we want to send immediately
+            if message.message_type in ['opt_out_notice', 'opt_out_confirmation']:
+                message.scheduled_for = timezone.now()
+
+            # Send message using the delivery service
+            success, thread_message = self.message_delivery.send_message(
+                channel=campaign.channel,
+                content=processed_content,
+                lead=participant.lead,
+                user=campaign.created_by,
+                subject=campaign.subject if hasattr(campaign, 'subject') else None,
+                service_phone=service_phone,
+                message_type=message.message_type  # Pass message type to delivery service
+            )
 
             if success:
                 # Update message status
@@ -628,294 +646,6 @@ class BulkCampaignProcessor:
                 return timezone.make_aware(timezone.datetime.combine(send_date, time(9, 0)))  # Default to 9 AM
 
         return None
-
-    def _send_email(self, message):
-        """Send an email message using the configured email service"""
-        try:
-            # Get campaign and participant
-            campaign = message.campaign
-            participant = message.participant
-            lead = participant.lead
-
-            # Prepare context for variable replacement
-            context = {
-                'lead': {
-                    'first_name': lead.first_name,
-                    'last_name': lead.last_name,
-                    'email': lead.email,
-                    'phone_number': lead.phone_number,
-                    'company': lead.company_name if hasattr(lead, 'company_name') else None,
-                    'title': lead.title if hasattr(lead, 'title') else None,
-                },
-                'campaign': {
-                    'name': campaign.name,
-                    'type': campaign.campaign_type,
-                    'channel': campaign.channel,
-                }
-            }
-
-            # Get message content using the appropriate source
-            processed_content = message.get_message_content()
-            processed_subject = campaign.subject.replace_variables(context) if hasattr(campaign, 'subject') else None
-
-            # Create thread for tracking
-            thread = ConversationThread.objects.create(
-                lead=lead,
-                channel='email',
-                status='open',
-                subject=processed_subject,
-                last_message_timestamp=timezone.now()
-            )
-
-            # Create thread message
-            thread_message = ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
-                content=processed_content,
-                channel='email',
-                lead=lead,
-                user=campaign.created_by
-            )
-
-            # TODO: Implement actual email sending using your email service
-            # This could be SendGrid, Mailgun, etc.
-            # For now, we'll just mark it as sent
-            message.update_status('sent')
-            thread_message.read_status = True
-            thread_message.save()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error sending email message: {str(e)}")
-            return False
-
-    def _send_sms(self, message):
-        """Send an SMS message using Twilio's direct messaging API"""
-        max_retries = 3
-        base_delay = 1  # Base delay in seconds
-        
-        for attempt in range(max_retries):
-            try:
-                # Get campaign and participant
-                campaign = message.campaign
-                participant = message.participant
-                lead = participant.lead
-
-                # Get the SMS config
-                sms_config = None
-                if campaign.campaign_type == 'drip' and message.drip_message_step:
-                    sms_config = message.drip_message_step.sms_config
-                elif campaign.campaign_type == 'reminder' and message.reminder_message:
-                    sms_config = message.reminder_message.sms_config
-                else:
-                    sms_config = campaign.sms_config
-
-                if not sms_config:
-                    raise ValueError("No SMS configuration found for the message")
-
-                # Get the service phone number from the SMS config
-                service_phone = sms_config.get_from_number()
-                if not service_phone:
-                    raise ValueError("No service phone number found in SMS configuration")
-
-                # Format phone numbers
-                formatted_to = self._format_phone_number(lead.phone_number)
-                formatted_from = self._format_phone_number(service_phone)
-
-                if not formatted_to or not formatted_from:
-                    raise ValueError("Invalid phone number format")
-
-                # Initialize Twilio client with custom configuration
-                client = Client(
-                    settings.TWILIO_ACCOUNT_SID,
-                    settings.TWILIO_AUTH_TOKEN,
-                )
-
-                # Get message content using the appropriate source
-                processed_content = message.get_message_content()
-
-                # Send message directly
-                twilio_message = client.messages.create(
-                    body=processed_content,
-                    from_=formatted_from,
-                    to=formatted_to,
-                )
-
-                # Create thread for tracking
-                thread = ConversationThread.objects.create(
-                    lead=lead,
-                    channel='sms',
-                    status='open',
-                    last_message_timestamp=timezone.now()
-                )
-
-                # Create conversation for the message
-                conversation = Conversation.objects.create(
-                    twilio_sid=twilio_message.sid,  # Use the message SID as conversation SID
-                    lead=lead,
-                    channel='sms',
-                    state='active',
-                    created_by=campaign.created_by
-                )
-
-                # Create thread message
-                ThreadMessage.objects.create(
-                    thread=thread,
-                    sender_type='user',
-                    content=processed_content,
-                    channel='sms',
-                    lead=lead,
-                    user=campaign.created_by,
-                    twilio_message=ConversationMessage.objects.create(
-                        message_sid=twilio_message.sid,
-                        conversation=conversation,  # Link to the conversation
-                        body=processed_content,
-                        direction='outbound',
-                        channel='sms'
-                    )
-                )
-
-                # Update message status to sent
-                message.update_status('sent')
-
-                return True
-
-            except (TwilioRestException) as e:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)  # Exponential backoff
-                    logger.warning(f"Connection timeout on attempt {attempt + 1}/{max_retries}. Retrying in {delay} seconds...")
-                    time.sleep(delay)
-                    continue
-                logger.error(f"Error sending SMS message after {max_retries} attempts: {str(e)}")
-                return False
-                
-            except Exception as e:
-                logger.error(f"Error sending SMS message: {str(e)}")
-                return False
-
-        return False
-
-    def _send_voice(self, message):
-        """Send a voice message using Bland AI"""
-        try:
-            # Get campaign and participant
-            campaign = message.campaign
-            participant = message.participant
-            lead = participant.lead
-
-            # Prepare context for variable replacement
-            context = {
-                'lead': {
-                    'first_name': lead.first_name,
-                    'last_name': lead.last_name,
-                    'email': lead.email,
-                    'phone_number': lead.phone_number,
-                    'company': lead.company_name if hasattr(lead, 'company_name') else None,
-                    'title': lead.title if hasattr(lead, 'title') else None,
-                },
-                'campaign': {
-                    'name': campaign.name,
-                    'type': campaign.campaign_type,
-                    'channel': campaign.channel,
-                }
-            }
-
-            # Get message content using the appropriate source
-            processed_content = message.get_message_content()
-
-            # Create thread for tracking
-            thread = ConversationThread.objects.create(
-                lead=lead,
-                channel='voice',
-                status='open',
-                last_message_timestamp=timezone.now()
-            )
-
-            # Create thread message
-            thread_message = ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
-                content=processed_content,
-                channel='voice',
-                lead=lead,
-                user=campaign.created_by
-            )
-
-            # TODO: Implement actual voice call using Bland AI
-            # This would involve:
-            # 1. Creating a Bland AI call
-            # 2. Linking it to the thread
-            # 3. Initiating the call
-            # For now, we'll just mark it as sent
-            message.update_status('sent')
-            thread_message.read_status = True
-            thread_message.save()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error sending voice message: {str(e)}")
-            return False
-
-    def _send_chat(self, message):
-        """Send a chat message using the configured chat service"""
-        try:
-            # Get campaign and participant
-            campaign = message.campaign
-            participant = message.participant
-            lead = participant.lead
-
-            # Prepare context for variable replacement
-            context = {
-                'lead': {
-                    'first_name': lead.first_name,
-                    'last_name': lead.last_name,
-                    'email': lead.email,
-                    'phone_number': lead.phone_number,
-                    'company': lead.company_name if hasattr(lead, 'company_name') else None,
-                    'title': lead.title if hasattr(lead, 'title') else None,
-                },
-                'campaign': {
-                    'name': campaign.name,
-                    'type': campaign.campaign_type,
-                    'channel': campaign.channel,
-                }
-            }
-
-            # Get message content using the appropriate source
-            processed_content = message.get_message_content()
-
-            # Create thread for tracking
-            thread = ConversationThread.objects.create(
-                lead=lead,
-                channel='chat',
-                status='open',
-                last_message_timestamp=timezone.now()
-            )
-
-            # Create thread message
-            thread_message = ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
-                content=processed_content,
-                channel='chat',
-                lead=lead,
-                user=campaign.created_by
-            )
-
-            # TODO: Implement actual chat message sending using your chat service
-            # This could be Intercom, Drift, etc.
-            # For now, we'll just mark it as sent
-            message.update_status('sent')
-            thread_message.read_status = True
-            thread_message.save()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error sending chat message: {str(e)}")
-            return False
 
     def _add_identity_participant(self, conversation_obj, identity, projected_address=None):
         """
@@ -1018,4 +748,39 @@ class BulkCampaignProcessor:
             
         # If we can't determine the format, return None
         logger.warning(f"Could not determine format for phone number: {phone_number}")
-        return None 
+        return None
+
+    def schedule_opt_out_message(self, participant, message_type='opt_out_confirmation'):
+        """
+        Schedule an opt-out message for a participant
+        
+        Args:
+            participant: LeadNurturingParticipant instance
+            message_type: Type of opt-out message ('opt_out_notice' or 'opt_out_confirmation')
+            
+        Returns:
+            bool: True if message was scheduled successfully
+        """
+        try:
+            with transaction.atomic():
+                campaign = participant.nurturing_campaign
+                
+                # Create the opt-out message
+                message = BulkCampaignMessage.objects.create(
+                    campaign=campaign,
+                    participant=participant,
+                    status='scheduled',
+                    scheduled_for=timezone.now(),  # Send immediately
+                    message_type=message_type
+                )
+                
+                # Update participant progress
+                participant.update_campaign_progress(
+                    scheduled_time=message.scheduled_for
+                )
+                
+                return True
+                
+        except Exception as e:
+            logger.exception(f"Error scheduling opt-out message for participant {participant.id}: {e}")
+            return False 

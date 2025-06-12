@@ -19,6 +19,7 @@ from external_models.models.external_references import Lead, Step as FunnelStep
 from external_models.models.accounts import User
 from journey_processor.services.condition_evaluator import ConditionEvaluator
 from django.conf import settings
+from shared_services.message_delivery import MessageDeliveryService
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class JourneyProcessor:
 
     def __init__(self):
         self.condition_evaluator = ConditionEvaluator()
+        self.message_delivery = MessageDeliveryService()
 
         # Register step processors for different step types
         self.step_processors = {
@@ -381,35 +383,20 @@ class JourneyProcessor:
             return {'success': False}
 
         try:
-            # Create thread for tracking
-            thread = ConversationThread.objects.create(
-                lead=participant.lead,
+            success, thread_message = self.message_delivery.send_message(
                 channel='email',
-                status='open',
-                subject=template.subject if hasattr(template, 'subject') else None,
-                last_message_timestamp=timezone.now()
-            )
-
-            # Create thread message
-            thread_message = ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
                 content=template.content,
-                channel='email',
                 lead=participant.lead,
-                user=step.journey.created_by
+                user=step.journey.created_by,
+                subject=template.subject if hasattr(template, 'subject') else None
             )
 
-            # TODO: Implement actual email sending using your email service
-            # This could be SendGrid, Mailgun, etc.
-            # For now, we'll just mark it as sent
-            thread_message.read_status = True
-            thread_message.save()
-
-            self._create_event(participant, step, 'action_sent', {
-                'template_id': str(template.id)
-            })
-            return {'success': True, 'transition_immediately': True}
+            if success:
+                self._create_event(participant, step, 'action_sent', {
+                    'template_id': str(template.id)
+                })
+                return {'success': True, 'transition_immediately': True}
+            return {'success': False}
         except Exception as e:
             logger.exception(f"Error sending email for step {step.id}: {e}")
             return {'success': False}
@@ -422,12 +409,6 @@ class JourneyProcessor:
             return {'success': False}
 
         try:
-            # Get or create Twilio conversation
-            conversation_obj, _ = self._create_or_get_twilio_conversation(
-                lead=participant.lead,
-                friendly_name=f"Journey-{step.journey.id}-Lead-{participant.lead.id}"
-            )
-
             # Get the service phone number
             service_phone = None
             if step.config and step.config.get('from_number'):
@@ -438,54 +419,20 @@ class JourneyProcessor:
             if not service_phone:
                 raise ValueError("No service phone number found in step or journey configuration")
 
-            formatted_proxy = self._format_phone_number(service_phone)
-
-            # Add lead participant
-            lead_participant, _ = self._add_participant_to_twilio_conversation(
-                conversation_obj=conversation_obj,
-                phone_number=participant.lead.phone_number,
-                proxy_address=formatted_proxy
-            )
-
-            # Add system identity with projected address
-            system_identity = 'acs-system'
-            system_participant, _ = self._add_identity_participant(
-                conversation_obj=conversation_obj,
-                identity=system_identity,
-                projected_address=formatted_proxy
-            )
-
-            # Send message using system identity as the author
-            message_obj = self._send_twilio_conversation_message(
-                conversation_obj=conversation_obj,
-                author=system_identity,
-                body=template.content,
-                channel='sms'
-            )
-
-            # Create thread and thread message for tracking
-            thread = ConversationThread.objects.create(
-                lead=participant.lead,
+            success, thread_message = self.message_delivery.send_message(
                 channel='sms',
-                status='open',
-                twilio_conversation=conversation_obj,
-                last_message_timestamp=timezone.now()
-            )
-
-            ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
                 content=template.content,
-                channel='sms',
-                twilio_message=message_obj,
                 lead=participant.lead,
-                user=step.journey.created_by
+                user=step.journey.created_by,
+                service_phone=service_phone
             )
 
-            self._create_event(participant, step, 'action_sent', {
-                'template_id': str(template.id)
-            })
-            return {'success': True, 'transition_immediately': True}
+            if success:
+                self._create_event(participant, step, 'action_sent', {
+                    'template_id': str(template.id)
+                })
+                return {'success': True, 'transition_immediately': True}
+            return {'success': False}
         except Exception as e:
             logger.exception(f"Error sending SMS for step {step.id}: {e}")
             return {'success': False}
@@ -498,37 +445,19 @@ class JourneyProcessor:
             return {'success': False}
 
         try:
-            # Create thread for tracking
-            thread = ConversationThread.objects.create(
-                lead=participant.lead,
+            success, thread_message = self.message_delivery.send_message(
                 channel='voice',
-                status='open',
-                last_message_timestamp=timezone.now()
-            )
-
-            # Create thread message
-            thread_message = ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
                 content=template.content,
-                channel='voice',
                 lead=participant.lead,
                 user=step.journey.created_by
             )
 
-            # TODO: Implement actual voice call using Bland AI
-            # This would involve:
-            # 1. Creating a Bland AI call
-            # 2. Linking it to the thread
-            # 3. Initiating the call
-            # For now, we'll just mark it as sent
-            thread_message.read_status = True
-            thread_message.save()
-
-            self._create_event(participant, step, 'action_sent', {
-                'template_id': str(template.id)
-            })
-            return {'success': True, 'transition_immediately': True}
+            if success:
+                self._create_event(participant, step, 'action_sent', {
+                    'template_id': str(template.id)
+                })
+                return {'success': True, 'transition_immediately': True}
+            return {'success': False}
         except Exception as e:
             logger.exception(f"Error sending voice call for step {step.id}: {e}")
             return {'success': False}
@@ -541,34 +470,19 @@ class JourneyProcessor:
             return {'success': False}
 
         try:
-            # Create thread for tracking
-            thread = ConversationThread.objects.create(
-                lead=participant.lead,
+            success, thread_message = self.message_delivery.send_message(
                 channel='chat',
-                status='open',
-                last_message_timestamp=timezone.now()
-            )
-
-            # Create thread message
-            thread_message = ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
                 content=template.content,
-                channel='chat',
                 lead=participant.lead,
                 user=step.journey.created_by
             )
 
-            # TODO: Implement actual chat message sending using your chat service
-            # This could be Intercom, Drift, etc.
-            # For now, we'll just mark it as sent
-            thread_message.read_status = True
-            thread_message.save()
-
-            self._create_event(participant, step, 'action_sent', {
-                'template_id': str(template.id)
-            })
-            return {'success': True, 'transition_immediately': True}
+            if success:
+                self._create_event(participant, step, 'action_sent', {
+                    'template_id': str(template.id)
+                })
+                return {'success': True, 'transition_immediately': True}
+            return {'success': False}
         except Exception as e:
             logger.exception(f"Error sending chat message for step {step.id}: {e}")
             return {'success': False}

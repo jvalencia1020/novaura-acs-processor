@@ -322,7 +322,7 @@ resource "aws_ecs_service" "bulk_campaign_worker_service" {
   launch_type     = "FARGATE"
   
   network_configuration {
-    subnets          = concat(data.aws_subnets.private.ids, data.aws_subnets.public.ids)
+    subnets          = data.aws_subnets.public.ids  # Using only the private-nat subnets for outbound internet access
     security_groups  = [aws_security_group.ecs_service.id]
     assign_public_ip = false
   }

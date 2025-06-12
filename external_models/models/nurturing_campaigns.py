@@ -116,6 +116,20 @@ class LeadNurturingCampaign(models.Model):
     voice_config = models.OneToOneField(VoiceConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     chat_config = models.OneToOneField(ChatConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
 
+    # Opt-out configuration
+    enable_opt_out = models.BooleanField(
+        default=True,
+        help_text="If True, allows participants to opt out by replying with 'STOP'"
+    )
+    initial_opt_out_notice = models.TextField(
+        default="Reply STOP to opt out of further messages.",
+        help_text="Message sent with the first message to inform participants about opt-out option"
+    )
+    opt_out_message = models.TextField(
+        default="You have been unsubscribed from this campaign. You will no longer receive messages.",
+        help_text="Message to send when a participant opts out"
+    )
+
     class Meta:
         managed = False
         db_table = 'acs_leadnurturingcampaign'
@@ -358,7 +372,14 @@ class BulkCampaignMessage(models.Model):
         ('opened', 'Opened'),
         ('clicked', 'Clicked'),
         ('replied', 'Replied'),
-        ('opted_out', 'Opted Out')
+        ('opted_out', 'Opted Out'),
+        ('cancelled', 'Cancelled')
+    ]
+
+    MESSAGE_TYPES = [
+        ('regular', 'Regular Message'),
+        ('opt_out_notice', 'Opt-out Notice'),
+        ('opt_out_confirmation', 'Opt-out Confirmation')
     ]
 
     campaign = models.ForeignKey('LeadNurturingCampaign', on_delete=models.CASCADE, related_name='messages')
@@ -400,6 +421,8 @@ class BulkCampaignMessage(models.Model):
         help_text="The reminder message configuration for this message (for reminder campaigns)"
     )
 
+    message_type = models.CharField(max_length=20, choices=MESSAGE_TYPES, default='regular')
+
     class Meta:
         managed = False
         db_table = 'bulk_campaign_message'
@@ -423,6 +446,10 @@ class BulkCampaignMessage(models.Model):
 
         if new_status == 'sent':
             self.sent_at = now
+            # If this is an opt-out confirmation message, mark it as sent on the participant
+            if self.message_type == 'opt_out_confirmation':
+                self.participant.opt_out_message_sent = True
+                self.participant.save()
         elif new_status == 'delivered':
             self.delivered_at = now
         elif new_status == 'opened':
@@ -469,6 +496,12 @@ class BulkCampaignMessage(models.Model):
                 'channel': campaign.channel,
             }
         }
+
+        # Handle opt-out messages
+        if self.message_type == 'opt_out_notice':
+            return campaign.initial_opt_out_notice
+        elif self.message_type == 'opt_out_confirmation':
+            return campaign.opt_out_message
 
         if self.campaign.campaign_type == 'drip' and self.drip_message_step:
             # Get the channel config for the message step
@@ -554,6 +587,11 @@ class LeadNurturingParticipant(models.Model):
     last_message_sent_at = models.DateTimeField(null=True, blank=True)
     messages_sent_count = models.PositiveIntegerField(default=0)
     next_scheduled_message = models.DateTimeField(null=True, blank=True)
+    opt_out_message_sent = models.BooleanField(
+        default=False,
+        help_text="Indicates whether the opt-out confirmation message has been sent"
+    )
+    metadata = models.JSONField(blank=True, null=True)
 
     class Meta:
         managed = False
@@ -718,3 +756,108 @@ class LeadNurturingParticipant(models.Model):
                 }
 
         return None
+
+    def can_opt_out(self):
+        """
+        Check if a participant can opt out of the campaign.
+        Returns a tuple of (can_opt_out: bool, reason: str)
+        """
+        # Check if campaign allows opt-outs
+        if not self.nurturing_campaign.enable_opt_out:
+            return False, "Opt-out is not enabled for this campaign"
+
+        # Check if participant is already opted out
+        if self.status == 'opted_out':
+            return False, "Participant has already opted out"
+
+        # Check if campaign is active
+        if not self.nurturing_campaign.is_active_or_scheduled():
+            return False, "Campaign is not active"
+
+        # Check if participant is in a valid state to opt out
+        if self.status not in ['active', 'paused']:
+            return False, f"Cannot opt out while in '{self.status}' status"
+
+        return True, "Participant can opt out"
+
+    def opt_out(self, user=None):
+        """
+        Handle participant opt-out:
+        1. Update participant status to opted_out
+        2. Set exited_campaign_at timestamp
+        3. Cancel all pending/scheduled messages
+        4. Update last_updated_by if user provided
+        """
+        # Check if participant can opt out
+        can_opt_out, reason = self.can_opt_out()
+        if not can_opt_out:
+            raise ValidationError(reason)
+
+        now = timezone.now()
+        
+        # Update participant status
+        self.status = 'opted_out'
+        self.exited_campaign_at = now
+        if user:
+            self.last_updated_by = user
+        self.save()
+
+        # Cancel all pending/scheduled messages
+        self.bulk_messages.filter(
+            status__in=['pending', 'scheduled']
+        ).update(
+            status='cancelled',
+            error_message='Message cancelled due to participant opt-out',
+            updated_at=now
+        )
+
+        # Create an opt-out event if this is a journey campaign
+        if self.nurturing_campaign.campaign_type == 'journey':
+            JourneyEvent.objects.create(
+                participant=self,
+                journey_step=self.current_journey_step,
+                event_type='opt_out',
+                created_by=user or self.last_updated_by
+            )
+
+        # Only create opt-out confirmation message if one hasn't been sent
+        if not self.opt_out_message_sent and self.nurturing_campaign.enable_opt_out:
+            BulkCampaignMessage.objects.create(
+                campaign=self.nurturing_campaign,
+                participant=self,
+                status='scheduled',
+                scheduled_for=now,
+                message_type='opt_out_confirmation'
+            )
+
+        return True
+
+    def reset_opt_out_message(self, user=None):
+        """
+        Reset the opt-out message flag to allow resending the opt-out message.
+        This is useful when:
+        1. The previous opt-out message failed to send
+        2. We need to resend the opt-out message
+        3. There was an issue with the previous opt-out process
+        
+        Args:
+            user: User performing the reset (optional)
+        """
+        self.opt_out_message_sent = False
+        if user:
+            self.last_updated_by = user
+        self.save()
+
+        # Log the reset in metadata
+        if not self.metadata:
+            self.metadata = {}
+        self.metadata.update({
+            'opt_out_message_reset': {
+                'timestamp': timezone.now().isoformat(),
+                'user_id': user.id if user else None,
+                'reason': 'Manual reset'
+            }
+        })
+        self.save()
+
+        return True

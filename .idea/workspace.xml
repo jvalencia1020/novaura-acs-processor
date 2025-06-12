@@ -7,6 +7,10 @@
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/journeys.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/journeys.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/ecs.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/ecs.tf" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -28,7 +32,7 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "Python.process_bulk_campaigns.executor": "Run",
-    "Python.process_due_messages.executor": "Debug",
+    "Python.process_due_messages.executor": "Run",
     "Python.run_bulk_campaign_processor.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
@@ -36,7 +40,7 @@
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
-  <component name="RunManager" selected="Python.process_due_messages">
+  <component name="RunManager" selected="Python.process_bulk_campaigns">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
@@ -188,27 +192,27 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>538</line>
+          <line>544</line>
           <option name="timeStamp" value="6" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/external_models/models/nurturing_campaigns.py</url>
-          <line>360</line>
+          <line>377</line>
           <option name="timeStamp" value="10" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>344</line>
+          <line>347</line>
           <option name="timeStamp" value="12" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/external_models/models/nurturing_campaigns.py</url>
-          <line>577</line>
+          <line>615</line>
           <option name="timeStamp" value="19" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>213</line>
+          <line>216</line>
           <option name="timeStamp" value="24" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -218,7 +222,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>271</line>
+          <line>274</line>
           <option name="timeStamp" value="26" />
         </line-breakpoint>
       </breakpoints>
