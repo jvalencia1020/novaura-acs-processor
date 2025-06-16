@@ -43,6 +43,9 @@ from twilio.http import HttpClient
 from twilio.base.exceptions import TwilioRestException
 
 from shared_services.message_delivery import MessageDeliveryService
+from shared_services.message_validation_service import MessageValidationService
+from shared_services.time_calculation_service import TimeCalculationService
+from shared_services.message_group_service import MessageGroupService
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,9 @@ class BulkCampaignProcessor:
             'blast': self._process_blast_campaign
         }
         self.message_delivery = MessageDeliveryService()
+        self.validator = MessageValidationService(self.message_delivery)
+        self.time_calculator = TimeCalculationService()
+        self.message_group = MessageGroupService()
 
     def process_campaign(self, campaign):
         """
@@ -96,22 +102,110 @@ class BulkCampaignProcessor:
         """
         # Find all pending messages that are due
         due_messages = BulkCampaignMessage.objects.filter(
-            status__in=['pending', 'scheduled'],
+            status__in=['pending', 'scheduled', 'failed'],  # Only include failed status for retry
             scheduled_for__lte=timezone.now()
         ).select_related(
             'campaign',
             'participant',
-            'participant__lead'
-        )
+            'participant__lead',
+            'message_group'  # Add message group to select_related
+        ).order_by('scheduled_for')  # Process messages in order of scheduled time
 
         processed_count = 0
+        processed_groups = set()  # Track which message groups we've processed
 
         for message in due_messages:
             try:
-                if self._send_message(message):
-                    processed_count += 1
+                # Skip if we've already processed this message group
+                if message.message_group_id in processed_groups:
+                    continue
+
+                # Get all messages in the group
+                related_messages = BulkCampaignMessage.objects.filter(
+                    message_group=message.message_group
+                ).order_by(
+                    '-message_type',  # Descending order puts 'regular' before 'opt_out_notice'
+                    'scheduled_for'  # Then by scheduled time
+                )
+
+                # Get regular and opt-out messages
+                regular_message = related_messages.filter(message_type='regular').first()
+                opt_out_message = related_messages.filter(message_type='opt_out_notice').first()
+
+                # Validate messages before sending
+                if not self.validator.validate_message_pair(regular_message, opt_out_message):
+                    # Update message group status
+                    self.message_group.update_group_status(
+                        message.message_group,
+                        'failed',
+                        'Message validation failed before sending'
+                    )
+
+                    # Update individual message statuses
+                    related_messages.update(
+                        status='failed',
+                        error_message='Message validation failed before sending',
+                        updated_at=timezone.now()
+                    )
+                    logger.warning(f"Messages in group {message.message_group_id} failed validation")
+                    continue
+
+                # If messages were previously in failed state, update their status
+                if message.message_group.status == 'failed':
+                    self.message_group.update_group_status(
+                        message.message_group,
+                        'pending',
+                        None  # Clear error message
+                    )
+                    related_messages.update(
+                        status='scheduled',
+                        error_message=None,
+                        updated_at=timezone.now()
+                    )
+                    logger.info(f"Retrying messages in group {message.message_group_id} that were previously failed")
+
+                # Process all messages in the group atomically
+                with transaction.atomic():
+                    all_success = True
+                    for related_message in related_messages:
+                        if not self._send_message(related_message):
+                            all_success = False
+                            break
+
+                    if not all_success:
+                        # If any message failed, mark the group as failed instead of cancelled
+                        self.message_group.update_group_status(
+                            message.message_group,
+                            'failed',
+                            'Message failed to send'
+                        )
+                        related_messages.update(
+                            status='failed',
+                            error_message='Message failed to send',
+                            updated_at=timezone.now()
+                        )
+                        logger.error(f"Failed to send messages in group {message.message_group_id}")
+                    else:
+                        processed_count += related_messages.count()
+
+                # Mark this message group as processed
+                processed_groups.add(message.message_group_id)
+
             except Exception as e:
-                logger.exception(f"Error processing message {message.id}: {e}")
+                logger.exception(f"Error processing messages in group {message.message_group_id}: {e}")
+                # Mark the group as failed instead of cancelled
+                self.message_group.update_group_status(
+                    message.message_group,
+                    'failed',
+                    f'Error processing messages: {str(e)}'
+                )
+                BulkCampaignMessage.objects.filter(
+                    message_group=message.message_group
+                ).update(
+                    status='failed',
+                    error_message=f'Error processing messages: {str(e)}',
+                    updated_at=timezone.now()
+                )
 
         return processed_count
 
@@ -163,6 +257,9 @@ class BulkCampaignProcessor:
                 # Schedule next message
                 if self._schedule_drip_message(participant, schedule):
                     scheduled_count += 1
+                
+                    # Schedule initial opt-out notice after regular message if needed
+                    self._schedule_initial_opt_out_notice(participant)
 
             except Exception as e:
                 logger.exception(f"Error processing participant {participant.id}: {str(e)}")
@@ -180,10 +277,14 @@ class BulkCampaignProcessor:
         now = timezone.now()
 
         # Find active participants that need reminders and have scheduled reachouts
+        # Exclude participants that have received regular messages
         participants = LeadNurturingParticipant.objects.filter(
             nurturing_campaign=campaign,
             status='active',
             lead__scheduled_reachouts__status='open'  # Only include leads with open scheduled reachouts
+        ).exclude(
+            bulk_messages__campaign=campaign,
+            bulk_messages__message_type='regular'  # Only exclude regular messages
         ).select_related('lead').distinct()
 
         scheduled_count = 0
@@ -205,6 +306,9 @@ class BulkCampaignProcessor:
             # Schedule reminder
             if self._schedule_reminder_message(participant, next_reminder, scheduled_reachout):
                 scheduled_count += 1
+            
+                # Schedule initial opt-out notice after regular message if needed
+                self._schedule_initial_opt_out_notice(participant)
 
         return scheduled_count
 
@@ -226,26 +330,25 @@ class BulkCampaignProcessor:
             return 0
 
         # Find active participants that haven't received the blast
+        # Exclude participants that have received regular messages
         participants = LeadNurturingParticipant.objects.filter(
             nurturing_campaign=campaign,
             status='active'
         ).exclude(
-            bulk_messages__campaign=campaign
+            bulk_messages__campaign=campaign,
+            bulk_messages__message_type='regular'  # Only exclude regular messages
         ).select_related('lead')
 
         scheduled_count = 0
 
         for participant in participants:
             try:
-                # Check if we should send based on business hours
-                if schedule.business_hours_only:
-                    current_time = now.time()
-                    if current_time < schedule.start_time:
-                        continue
-
                 # Schedule blast message
                 if self._schedule_blast_message(participant, schedule):
                     scheduled_count += 1
+                    
+                    # Schedule initial opt-out notice after regular message if needed
+                    self._schedule_initial_opt_out_notice(participant)
 
             except Exception as e:
                 logger.exception(f"Error processing participant {participant.id}: {e}")
@@ -270,15 +373,12 @@ class BulkCampaignProcessor:
             return False
 
         # Check business hours if enabled
-        if schedule.business_hours_only:
-            current_time = now.time()
-            if current_time < schedule.start_time or current_time >= schedule.end_time:
-                return False
+        if not self.time_calculator.is_within_business_hours(now, schedule):
+            return False
 
         # Check weekend restrictions if enabled
-        if schedule.exclude_weekends:
-            if now.weekday() >= 5:  # 5 is Saturday, 6 is Sunday
-                return False
+        if schedule.exclude_weekends and now.weekday() >= 5:
+            return False
 
         return True
 
@@ -367,23 +467,11 @@ class BulkCampaignProcessor:
                 
                 # Calculate next send time
                 now = timezone.now()
-                next_time = now + current_step.get_delay_timedelta()
+                delay = current_step.get_delay_timedelta()
+                next_time = now + delay
                 
-                # Apply business hours restrictions
-                if schedule.business_hours_only:
-                    if next_time.time() < schedule.start_time:
-                        next_time = timezone.make_aware(
-                            timezone.datetime.combine(next_time.date(), schedule.start_time)
-                        )
-                    elif next_time.time() > schedule.end_time:
-                        next_time = timezone.make_aware(
-                            timezone.datetime.combine(next_time.date() + timedelta(days=1), schedule.start_time)
-                        )
-                
-                # Apply weekend restrictions
-                if schedule.exclude_weekends:
-                    while next_time.weekday() >= 5:
-                        next_time += timedelta(days=1)
+                # Apply schedule restrictions
+                next_time = self.time_calculator.get_next_valid_time(next_time, schedule)
                 
                 # Update progress with next interval
                 progress.next_scheduled_interval = next_time
@@ -395,7 +483,18 @@ class BulkCampaignProcessor:
                     logger.error(f"Message step {current_step.id} has no content in channel config")
                     return False
 
-                # Create message
+                # Create or get message group
+                message_group = self.message_group.create_or_get_message_group(
+                    participant.nurturing_campaign,
+                    participant,
+                    next_time
+                )
+
+                if not message_group:
+                    logger.error(f"Failed to create/get message group for participant {participant.id}")
+                    return False
+
+                # Create regular message
                 try:
                     message = BulkCampaignMessage.objects.create(
                         campaign=participant.nurturing_campaign,
@@ -403,11 +502,36 @@ class BulkCampaignProcessor:
                         status='scheduled',
                         scheduled_for=next_time,
                         drip_message_step=current_step,
-                        step_order=current_step.order
+                        step_order=current_step.order,
+                        message_type='regular',
+                        message_group=message_group
                     )
                 except Exception as e:
                     logger.error(f"Failed to create message for participant {participant.id}: {str(e)}")
                     return False
+
+                # Schedule opt-out notice if needed
+                if not participant.opt_out_message_sent and participant.nurturing_campaign.enable_opt_out:
+                    try:
+                        # Schedule opt-out notice after regular message
+                        opt_out_message = BulkCampaignMessage.objects.create(
+                            campaign=participant.nurturing_campaign,
+                            participant=participant,
+                            status='scheduled',
+                            scheduled_for=next_time + timedelta(minutes=1),  # Send 1 minute after regular message
+                            message_type='opt_out_notice',
+                            message_group=message_group
+                        )
+                        participant.opt_out_message_sent = True
+                        participant.save()
+                    except Exception as e:
+                        # If opt-out message fails, cancel the group
+                        self.message_group.cancel_group(
+                            message_group,
+                            f"Failed to schedule opt-out message: {str(e)}"
+                        )
+                        logger.error(f"Failed to schedule opt-out message for participant {participant.id}: {str(e)}")
+                        return False
                 
                 # Update participant progress
                 try:
@@ -415,6 +539,11 @@ class BulkCampaignProcessor:
                         scheduled_time=next_time
                     )
                 except Exception as e:
+                    # If progress update fails, cancel the group
+                    self.message_group.cancel_group(
+                        message_group,
+                        f"Failed to update participant progress: {str(e)}"
+                    )
                     logger.error(f"Failed to update participant progress for {participant.id}: {str(e)}")
                     return False
                 
@@ -429,10 +558,25 @@ class BulkCampaignProcessor:
         try:
             with transaction.atomic():
                 # Calculate send time based on reminder settings and scheduled reachout date
-                send_time = self._calculate_reminder_time(reminder, participant, scheduled_reachout.scheduled_date)
+                send_time = self.time_calculator.calculate_reminder_time(
+                    reminder,
+                    scheduled_reachout.scheduled_date,
+                    reminder.schedule.use_relative_schedule
+                )
 
                 if not send_time:
                     logger.debug(f"No valid send time calculated for participant {participant.id}")
+                    return False
+
+                # Create or get message group
+                message_group = self.message_group.create_or_get_message_group(
+                    participant.nurturing_campaign,
+                    participant,
+                    send_time
+                )
+
+                if not message_group:
+                    logger.error(f"Failed to create/get message group for participant {participant.id}")
                     return False
 
                 # Create message
@@ -440,7 +584,8 @@ class BulkCampaignProcessor:
                     campaign=participant.nurturing_campaign,
                     participant=participant,
                     status='scheduled',
-                    scheduled_for=send_time
+                    scheduled_for=send_time,
+                    message_group=message_group
                 )
 
                 # Create progress record
@@ -480,26 +625,24 @@ class BulkCampaignProcessor:
             with transaction.atomic():
                 send_time = schedule.send_time
 
-                # Check if we should send based on business hours
-                if schedule.business_hours_only:
-                    current_time = send_time.time()
-                    if current_time < schedule.start_time:
-                        # Move to start time today
-                        send_time = timezone.make_aware(
-                            timezone.datetime.combine(send_time.date(), schedule.start_time)
-                        )
-                    elif current_time > schedule.end_time:
-                        # Move to start time next day
-                        send_time = timezone.make_aware(
-                            timezone.datetime.combine(send_time.date() + timedelta(days=1), schedule.start_time)
-                        )
+                # Create or get message group
+                message_group = self.message_group.create_or_get_message_group(
+                    participant.nurturing_campaign,
+                    participant,
+                    send_time
+                )
+
+                if not message_group:
+                    logger.error(f"Failed to create/get message group for participant {participant.id}")
+                    return False
 
                 # Create message
                 message = BulkCampaignMessage.objects.create(
                     campaign=participant.nurturing_campaign,
                     participant=participant,
                     status='scheduled',
-                    scheduled_for=send_time
+                    scheduled_for=send_time,
+                    message_group=message_group
                 )
 
                 # Create or update blast progress
@@ -541,7 +684,16 @@ class BulkCampaignProcessor:
             # Get service phone number for SMS/Voice
             service_phone = None
             if campaign.channel in ['sms', 'voice']:
-                if campaign.campaign_type == 'drip' and message.drip_message_step:
+                if message.message_type == 'opt_out_notice' or message.message_type == 'opt_out_confirmation':
+                    # For opt-out messages in drip campaigns, use the first step's config
+                    if campaign.campaign_type == 'drip':
+                        first_step = campaign.drip_schedule.message_steps.order_by('order').first()
+                        if first_step and first_step.sms_config:
+                            service_phone = first_step.sms_config.get_from_number()
+                    # For other campaign types, use the campaign's default SMS config
+                    elif campaign.sms_config:
+                        service_phone = campaign.sms_config.get_from_number()
+                elif campaign.campaign_type == 'drip' and message.drip_message_step:
                     service_phone = message.drip_message_step.sms_config.get_from_number()
                 elif campaign.campaign_type == 'reminder' and message.reminder_message:
                     service_phone = message.reminder_message.sms_config.get_from_number()
@@ -765,13 +917,43 @@ class BulkCampaignProcessor:
             with transaction.atomic():
                 campaign = participant.nurturing_campaign
                 
+                # For opt-out confirmations, we can send immediately
+                if message_type == 'opt_out_confirmation':
+                    scheduled_for = timezone.now()
+                else:
+                    # For opt-out notices, we need to check if there are any pending regular messages
+                    pending_regular = BulkCampaignMessage.objects.filter(
+                        participant=participant,
+                        status__in=['pending', 'scheduled'],
+                        message_type='regular'
+                    ).order_by('scheduled_for').first()
+                    
+                    if pending_regular:
+                        # Schedule opt-out notice after the last regular message
+                        scheduled_for = pending_regular.scheduled_for + timedelta(minutes=1)
+                    else:
+                        # No pending regular messages, send immediately
+                        scheduled_for = timezone.now()
+
+                # Create or get message group
+                message_group = self.message_group.create_or_get_message_group(
+                    campaign,
+                    participant,
+                    scheduled_for
+                )
+
+                if not message_group:
+                    logger.error(f"Failed to create/get message group for participant {participant.id}")
+                    return False
+                
                 # Create the opt-out message
                 message = BulkCampaignMessage.objects.create(
                     campaign=campaign,
                     participant=participant,
                     status='scheduled',
-                    scheduled_for=timezone.now(),  # Send immediately
-                    message_type=message_type
+                    scheduled_for=scheduled_for,
+                    message_type=message_type,
+                    message_group=message_group
                 )
                 
                 # Update participant progress
@@ -783,4 +965,37 @@ class BulkCampaignProcessor:
                 
         except Exception as e:
             logger.exception(f"Error scheduling opt-out message for participant {participant.id}: {e}")
+            # If we created a message group, cancel it
+            if 'message_group' in locals():
+                self.message_group.cancel_group(
+                    message_group,
+                    f"Failed to schedule opt-out message: {str(e)}"
+                )
+            return False
+
+    def _schedule_initial_opt_out_notice(self, participant):
+        """
+        Schedule the initial opt-out notice for a participant if:
+        1. The campaign has opt-out enabled
+        2. The participant hasn't received the opt-out notice yet
+        3. The participant is active
+        """
+        try:
+            campaign = participant.nurturing_campaign
+            
+            # Check if we should schedule the opt-out notice
+            if (campaign.enable_opt_out and 
+                not participant.opt_out_message_sent and 
+                participant.status == 'active'):
+                
+                # Schedule the opt-out notice
+                if self.schedule_opt_out_message(participant, message_type='opt_out_notice'):
+                    # Mark the opt-out message as sent
+                    participant.opt_out_message_sent = True
+                    participant.save()
+                    logger.info(f"Scheduled initial opt-out notice for participant {participant.id}")
+                    return True
+                    
+        except Exception as e:
+            logger.exception(f"Error scheduling initial opt-out notice for participant {participant.id}: {e}")
             return False 

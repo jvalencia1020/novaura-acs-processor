@@ -103,7 +103,6 @@ class MessageDeliveryService:
                 channel='sms',
                 lead=lead,
                 user=user,
-                message_type=message_type,
                 twilio_message=ConversationMessage.objects.create(
                     message_sid=twilio_message.sid,
                     conversation=conversation,

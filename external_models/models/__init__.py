@@ -1,6 +1,7 @@
 from .nurturing_campaigns import (
     LeadNurturingCampaign,
     BulkCampaignMessage,
+    BulkCampaignMessageGroup,
     LeadNurturingParticipant
 )
 from .journeys import (
@@ -79,6 +80,7 @@ __all__ = [
 
     # Bulk Campaigns
     'BulkCampaignMessage',
+    'BulkCampaignMessageGroup',
     'LeadNurturingParticipant',
 
     # Messages

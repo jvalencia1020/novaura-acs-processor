@@ -362,6 +362,50 @@ class LeadNurturingCampaign(models.Model):
             
         return ""
 
+class BulkCampaignMessageGroup(models.Model):
+    """
+    Model to group related bulk campaign messages together for a participant.
+    This allows handling message sending logic for groups of messages,
+    such as regular messages and opt-out messages, at the participant level.
+    """
+    campaign = models.ForeignKey('LeadNurturingCampaign', on_delete=models.CASCADE, related_name='message_groups')
+    participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='message_groups')
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Pending'),
+            ('in_progress', 'In Progress'),
+            ('completed', 'Completed'),
+            ('failed', 'Failed'),
+            ('cancelled', 'Cancelled')
+        ],
+        default='pending'
+    )
+    metadata = models.JSONField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'bulk_campaign_message_group'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['campaign', 'status']),
+            models.Index(fields=['participant', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.campaign.name} - {self.participant.lead.email} - Group {self.id}"
+
+    def update_status(self, new_status, metadata=None):
+        """Update group status and metadata"""
+        self.status = new_status
+        if metadata:
+            if not self.metadata:
+                self.metadata = {}
+            self.metadata.update(metadata)
+        self.save()
+
 class BulkCampaignMessage(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -384,6 +428,14 @@ class BulkCampaignMessage(models.Model):
 
     campaign = models.ForeignKey('LeadNurturingCampaign', on_delete=models.CASCADE, related_name='messages')
     participant = models.ForeignKey('LeadNurturingParticipant', on_delete=models.CASCADE, related_name='bulk_messages')
+    message_group = models.ForeignKey(
+        'BulkCampaignMessageGroup',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='messages',
+        help_text="The message group this message belongs to"
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     scheduled_for = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
@@ -434,6 +486,7 @@ class BulkCampaignMessage(models.Model):
             models.Index(fields=['drip_message_step']),
             models.Index(fields=['step_order']),
             models.Index(fields=['reminder_message']),
+            models.Index(fields=['message_group']),
         ]
 
     def __str__(self):
