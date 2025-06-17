@@ -23,6 +23,12 @@ class Conversation(models.Model):
 
     # The unique Twilio ID for this conversation (e.g. 'CHXXXXXXXXXXXXXXXXX')
     twilio_sid = models.CharField(max_length=34, unique=True)
+    
+    # Twilio Account SID
+    account_sid = models.CharField(max_length=34, blank=True, null=True)
+    
+    # Twilio Messaging Service SID (if used)
+    messaging_service_sid = models.CharField(max_length=34, blank=True, null=True)
 
     # Friendly name, if you set one via Twilio or want to store a local name
     friendly_name = models.CharField(max_length=255, blank=True, null=True)
@@ -66,6 +72,8 @@ class Conversation(models.Model):
         indexes = [
             models.Index(fields=['state']),
             models.Index(fields=['friendly_name']),
+            models.Index(fields=['account_sid']),
+            models.Index(fields=['messaging_service_sid']),
         ]
         ordering = ['-created_at']
 
@@ -89,6 +97,12 @@ class Participant(models.Model):
 
     # For SMS-based participants, store their phone number.
     phone_number = models.CharField(max_length=20, blank=True, null=True)
+    
+    # Location data for phone numbers
+    country = models.CharField(max_length=2, blank=True, null=True)
+    state = models.CharField(max_length=50, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    zip_code = models.CharField(max_length=20, blank=True, null=True)
 
     # If a user on your team is also a participant.
     user = models.ForeignKey(
@@ -108,6 +122,11 @@ class Participant(models.Model):
     class Meta:
         managed = False
         db_table = 'communications_participant'
+        indexes = [
+            models.Index(fields=['phone_number']),
+            models.Index(fields=['country']),
+            models.Index(fields=['state']),
+        ]
 
     def __str__(self):
         return f"Participant {self.participant_sid} in {self.conversation}"
@@ -117,8 +136,16 @@ class ConversationMessage(models.Model):
     """
     A message in a Twilio Conversation.
     """
-    # Twilio conversation message SID (e.g. 'IMXXXXXXXXXXXXXXXXX')
+    # Twilio message identifiers
     message_sid = models.CharField(max_length=34, unique=True)
+    sms_message_sid = models.CharField(max_length=34, blank=True, null=True)
+    sms_sid = models.CharField(max_length=34, blank=True, null=True)
+    
+    # Twilio Account SID
+    account_sid = models.CharField(max_length=34, blank=True, null=True)
+    
+    # Twilio Messaging Service SID (if used)
+    messaging_service_sid = models.CharField(max_length=34, blank=True, null=True)
 
     conversation = models.ForeignKey(
         Conversation,
@@ -150,6 +177,15 @@ class ConversationMessage(models.Model):
         help_text="Message direction if applicable."
     )
 
+    # Message status
+    status = models.CharField(max_length=50, blank=True, null=True)
+    
+    # Number of segments for long messages
+    num_segments = models.IntegerField(default=1)
+    
+    # Number of media attachments
+    num_media = models.IntegerField(default=0)
+
     # Optional field to store a media URL if the message includes an attachment.
     media_url = models.URLField(blank=True, null=True, help_text="Optional URL for attached media.")
 
@@ -167,11 +203,20 @@ class ConversationMessage(models.Model):
         help_text="Channel of communication used for this message."
     )
 
+    # Store the complete raw message data
+    raw_data = models.JSONField(blank=True, null=True, help_text="Complete raw message data from Twilio")
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         managed = False
         db_table = 'communications_conversationmessage'
+        indexes = [
+            models.Index(fields=['message_sid']),
+            models.Index(fields=['sms_message_sid']),
+            models.Index(fields=['sms_sid']),
+            models.Index(fields=['status']),
+        ]
         ordering = ['created_at']
 
     def __str__(self):
