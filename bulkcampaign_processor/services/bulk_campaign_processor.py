@@ -306,7 +306,6 @@ class BulkCampaignProcessor:
             # Schedule reminder
             if self._schedule_reminder_message(participant, next_reminder, scheduled_reachout):
                 scheduled_count += 1
-            
                 # Schedule initial opt-out notice after regular message if needed
                 self._schedule_initial_opt_out_notice(participant)
 
@@ -568,6 +567,23 @@ class BulkCampaignProcessor:
                     logger.debug(f"No valid send time calculated for participant {participant.id}")
                     return False
 
+                campaign = participant.nurturing_campaign
+
+                # Find the correct ReminderMessage for the reminder time and campaign channel
+                reminder_message = None
+                if campaign.channel == 'sms':
+                    reminder_message = reminder.messages.filter(sms_config__isnull=False).first()
+                elif campaign.channel == 'email':
+                    reminder_message = reminder.messages.filter(email_config__isnull=False).first()
+                elif campaign.channel == 'voice':
+                    reminder_message = reminder.messages.filter(voice_config__isnull=False).first()
+                elif campaign.channel == 'chat':
+                    reminder_message = reminder.messages.filter(chat_config__isnull=False).first()
+
+                if not reminder_message:
+                    logger.error(f"No ReminderMessage found for reminder {reminder.id} and channel {campaign.channel}")
+                    return False
+
                 # Create or get message group
                 message_group = self.message_group.create_or_get_message_group(
                     participant.nurturing_campaign,
@@ -585,6 +601,7 @@ class BulkCampaignProcessor:
                     participant=participant,
                     status='scheduled',
                     scheduled_for=send_time,
+                    reminder_message=reminder_message,
                     message_group=message_group
                 )
 
@@ -684,13 +701,23 @@ class BulkCampaignProcessor:
             # Get service phone number for SMS/Voice
             service_phone = None
             if campaign.channel in ['sms', 'voice']:
-                if message.message_type == 'opt_out_notice' or message.message_type == 'opt_out_confirmation':
-                    # For opt-out messages in drip campaigns, use the first step's config
+                if message.message_type in ['opt_out_notice', 'opt_out_confirmation']:
                     if campaign.campaign_type == 'drip':
                         first_step = campaign.drip_schedule.message_steps.order_by('order').first()
                         if first_step and first_step.sms_config:
                             service_phone = first_step.sms_config.get_from_number()
-                    # For other campaign types, use the campaign's default SMS config
+                    elif campaign.campaign_type == 'reminder':
+                        # Get the first reminder_message in the message group
+                        first_reminder_message = None
+                        if message.message_group:
+                            first_reminder_message = (
+                                BulkCampaignMessage.objects
+                                .filter(message_group=message.message_group, reminder_message__isnull=False)
+                                .order_by('scheduled_for')
+                                .first()
+                            )
+                        if first_reminder_message and first_reminder_message.reminder_message and first_reminder_message.reminder_message.sms_config:
+                            service_phone = first_reminder_message.reminder_message.sms_config.get_from_number()
                     elif campaign.sms_config:
                         service_phone = campaign.sms_config.get_from_number()
                 elif campaign.campaign_type == 'drip' and message.drip_message_step:

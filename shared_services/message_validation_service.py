@@ -35,9 +35,26 @@ class MessageValidationService:
                 return False
 
             # Validate regular message content
-            if not regular_message.get_message_content():
-                logger.warning(f"Regular message {regular_message.id} has no content")
-                return False
+            if campaign.campaign_type == 'reminder':
+                if not regular_message.reminder_message:
+                    logger.warning(f"Regular message {regular_message.id} has no reminder_message attached")
+                    return False
+                channel_config = None
+                if campaign.channel == 'sms':
+                    channel_config = regular_message.reminder_message.sms_config
+                elif campaign.channel == 'email':
+                    channel_config = regular_message.reminder_message.email_config
+                elif campaign.channel == 'voice':
+                    channel_config = regular_message.reminder_message.voice_config
+                elif campaign.channel == 'chat':
+                    channel_config = regular_message.reminder_message.chat_config
+                if not channel_config or not channel_config.content:
+                    logger.warning(f"Regular message {regular_message.id} has no content in reminder_message channel config")
+                    return False
+            else:
+                if not regular_message.get_message_content():
+                    logger.warning(f"Regular message {regular_message.id} has no content")
+                    return False
 
             # Validate lead contact information
             if campaign.channel in ['sms', 'voice']:
