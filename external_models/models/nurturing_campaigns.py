@@ -488,9 +488,59 @@ class BulkCampaignMessage(models.Model):
             models.Index(fields=['reminder_message']),
             models.Index(fields=['message_group']),
         ]
+        # Unique constraints to prevent duplicate message scheduling
+        constraints = [
+            # For blast campaigns: unique per participant, campaign, and message type
+            # (when drip_message_step and reminder_message are NULL)
+            models.UniqueConstraint(
+                fields=['participant', 'campaign', 'message_type'],
+                condition=models.Q(
+                    drip_message_step__isnull=True,
+                    reminder_message__isnull=True
+                ),
+                name='unique_blast_message_per_participant'
+            ),
+            # For drip campaigns: unique per participant, drip message step, and message type
+            # (when drip_message_step is not NULL)
+            models.UniqueConstraint(
+                fields=['participant', 'drip_message_step', 'message_type'],
+                condition=models.Q(
+                    drip_message_step__isnull=False
+                ),
+                name='unique_drip_message_per_step'
+            ),
+            # For reminder campaigns: unique per participant, reminder message, and message type
+            # (when reminder_message is not NULL)
+            models.UniqueConstraint(
+                fields=['participant', 'reminder_message', 'message_type'],
+                condition=models.Q(
+                    reminder_message__isnull=False
+                ),
+                name='unique_reminder_message_per_reminder'
+            ),
+        ]
 
     def __str__(self):
         return f"{self.campaign.name} - {self.participant.lead.email} - {self.status}"
+
+    def clean(self):
+        """Validate that the appropriate fields are set based on campaign type"""
+        super().clean()
+        
+        campaign = self.campaign
+        if not campaign:
+            return
+            
+        if campaign.campaign_type == 'drip' and not self.drip_message_step:
+            raise ValidationError("Drip message step is required for drip campaigns")
+        elif campaign.campaign_type == 'reminder' and not self.reminder_message:
+            raise ValidationError("Reminder message is required for reminder campaigns")
+        elif campaign.campaign_type == 'blast' and (self.drip_message_step or self.reminder_message):
+            raise ValidationError("Blast campaigns should not have drip_message_step or reminder_message set")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
 
     def update_status(self, new_status, metadata=None):
         """Update message status and related timestamps"""
@@ -613,6 +663,101 @@ class BulkCampaignMessage(models.Model):
             return replace_variables(channel_config.content, context)
             
         return ""
+
+    @classmethod
+    def check_existing_message(cls, participant, campaign, message_type, drip_message_step=None, reminder_message=None):
+        """
+        Check if a message already exists for the given parameters.
+        Returns the existing message if found, None otherwise.
+        
+        This method respects the unique constraints for different campaign types:
+        - Blast campaigns: unique per participant + campaign + message_type
+        - Drip campaigns: unique per participant + drip_message_step + message_type  
+        - Reminder campaigns: unique per participant + reminder_message + message_type
+        """
+        # Base filters
+        filters = {
+            'participant': participant,
+            'campaign': campaign,
+            'message_type': message_type,
+        }
+        
+        # Add campaign-specific filters based on campaign type
+        if campaign.campaign_type == 'blast':
+            # For blast campaigns, ensure drip_message_step and reminder_message are NULL
+            filters.update({
+                'drip_message_step__isnull': True,
+                'reminder_message__isnull': True,
+            })
+        elif campaign.campaign_type == 'drip':
+            # For drip campaigns, require drip_message_step to be set
+            if not drip_message_step:
+                raise ValueError("drip_message_step is required for drip campaigns")
+            filters['drip_message_step'] = drip_message_step
+        elif campaign.campaign_type == 'reminder':
+            # For reminder campaigns, require reminder_message to be set
+            if not reminder_message:
+                raise ValueError("reminder_message is required for reminder campaigns")
+            filters['reminder_message'] = reminder_message
+        
+        # Exclude cancelled and failed messages from the check
+        existing_message = cls.objects.filter(
+            **filters
+        ).exclude(
+            status__in=['cancelled', 'failed']
+        ).first()
+        
+        return existing_message
+
+    @classmethod
+    def create_message_safely(cls, participant, campaign, message_type, **kwargs):
+        """
+        Safely create a bulk campaign message, checking for existing messages first.
+        Returns the created message or the existing message if one already exists.
+        
+        This method prevents duplicate message creation by checking existing messages
+        before creating new ones, respecting the unique constraints for each campaign type.
+        """
+        # Determine campaign-specific parameters
+        drip_message_step = kwargs.get('drip_message_step')
+        reminder_message = kwargs.get('reminder_message')
+        
+        # Check for existing message
+        existing_message = cls.check_existing_message(
+            participant=participant,
+            campaign=campaign,
+            message_type=message_type,
+            drip_message_step=drip_message_step,
+            reminder_message=reminder_message
+        )
+        
+        if existing_message:
+            return existing_message
+        
+        # Create new message
+        message_data = {
+            'participant': participant,
+            'campaign': campaign,
+            'message_type': message_type,
+            **kwargs
+        }
+        
+        # Ensure campaign-specific fields are properly set
+        if campaign.campaign_type == 'blast':
+            message_data.update({
+                'drip_message_step': None,
+                'reminder_message': None,
+            })
+        elif campaign.campaign_type == 'drip':
+            if not drip_message_step:
+                raise ValueError("drip_message_step is required for drip campaigns")
+            message_data['drip_message_step'] = drip_message_step
+        elif campaign.campaign_type == 'reminder':
+            if not reminder_message:
+                raise ValueError("reminder_message is required for reminder campaigns")
+            message_data['reminder_message'] = reminder_message
+        
+        return cls.objects.create(**message_data)
 
 class LeadNurturingParticipant(models.Model):
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='lead_nurturing_participations')

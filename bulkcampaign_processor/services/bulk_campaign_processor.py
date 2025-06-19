@@ -493,18 +493,24 @@ class BulkCampaignProcessor:
                     logger.error(f"Failed to create/get message group for participant {participant.id}")
                     return False
 
-                # Create regular message
+                # Create regular message safely (will return existing message if one exists)
                 try:
-                    message = BulkCampaignMessage.objects.create(
-                        campaign=participant.nurturing_campaign,
+                    message = BulkCampaignMessage.create_message_safely(
                         participant=participant,
+                        campaign=participant.nurturing_campaign,
+                        message_type='regular',
                         status='scheduled',
                         scheduled_for=next_time,
                         drip_message_step=current_step,
                         step_order=current_step.order,
-                        message_type='regular',
                         message_group=message_group
                     )
+                    
+                    # If message already existed, don't schedule another one
+                    if message.created_at < now - timedelta(seconds=5):  # Allow 5 second tolerance for race conditions
+                        logger.info(f"Message already exists for participant {participant.id} at step {current_step.order}")
+                        return False
+                        
                 except Exception as e:
                     logger.error(f"Failed to create message for participant {participant.id}: {str(e)}")
                     return False
@@ -513,12 +519,12 @@ class BulkCampaignProcessor:
                 if not participant.opt_out_message_sent and participant.nurturing_campaign.enable_opt_out:
                     try:
                         # Schedule opt-out notice after regular message
-                        opt_out_message = BulkCampaignMessage.objects.create(
-                            campaign=participant.nurturing_campaign,
+                        opt_out_message = BulkCampaignMessage.create_message_safely(
                             participant=participant,
+                            campaign=participant.nurturing_campaign,
+                            message_type='opt_out_notice',
                             status='scheduled',
                             scheduled_for=next_time + timedelta(minutes=1),  # Send 1 minute after regular message
-                            message_type='opt_out_notice',
                             message_group=message_group
                         )
                         participant.opt_out_message_sent = True
@@ -595,15 +601,22 @@ class BulkCampaignProcessor:
                     logger.error(f"Failed to create/get message group for participant {participant.id}")
                     return False
 
-                # Create message
-                message = BulkCampaignMessage.objects.create(
-                    campaign=participant.nurturing_campaign,
+                # Create message safely (will return existing message if one exists)
+                message = BulkCampaignMessage.create_message_safely(
                     participant=participant,
+                    campaign=participant.nurturing_campaign,
+                    message_type='regular',
                     status='scheduled',
                     scheduled_for=send_time,
                     reminder_message=reminder_message,
                     message_group=message_group
                 )
+                
+                # If message already existed, don't schedule another one
+                now = timezone.now()
+                if message.created_at < now - timedelta(seconds=5):  # Allow 5 second tolerance for race conditions
+                    logger.info(f"Reminder message already exists for participant {participant.id} and reminder {reminder.id}")
+                    return False
 
                 # Create progress record
                 if reminder.schedule.use_relative_schedule:
@@ -653,14 +666,21 @@ class BulkCampaignProcessor:
                     logger.error(f"Failed to create/get message group for participant {participant.id}")
                     return False
 
-                # Create message
-                message = BulkCampaignMessage.objects.create(
-                    campaign=participant.nurturing_campaign,
+                # Create message safely (will return existing message if one exists)
+                message = BulkCampaignMessage.create_message_safely(
                     participant=participant,
+                    campaign=participant.nurturing_campaign,
+                    message_type='regular',
                     status='scheduled',
                     scheduled_for=send_time,
                     message_group=message_group
                 )
+                
+                # If message already existed, don't schedule another one
+                now = timezone.now()
+                if message.created_at < now - timedelta(seconds=5):  # Allow 5 second tolerance for race conditions
+                    logger.info(f"Blast message already exists for participant {participant.id}")
+                    return False
 
                 # Create or update blast progress
                 progress, created = BlastCampaignProgress.objects.get_or_create(
