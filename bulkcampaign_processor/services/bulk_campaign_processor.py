@@ -525,6 +525,7 @@ class BulkCampaignProcessor:
                             message_type='opt_out_notice',
                             status='scheduled',
                             scheduled_for=next_time + timedelta(minutes=1),  # Send 1 minute after regular message
+                            drip_message_step=current_step,  # Add the missing drip_message_step parameter
                             message_group=message_group
                         )
                         participant.opt_out_message_sent = True
@@ -993,13 +994,57 @@ class BulkCampaignProcessor:
                     logger.error(f"Failed to create/get message group for participant {participant.id}")
                     return False
                 
-                # Create the opt-out message
-                message = BulkCampaignMessage.objects.create(
-                    campaign=campaign,
+                # Determine campaign-specific parameters
+                drip_message_step = None
+                reminder_message = None
+                
+                if campaign.campaign_type == 'drip':
+                    # For drip campaigns, we need to get the current step
+                    progress = participant.drip_campaign_progress.first()
+                    if progress and progress.current_step:
+                        drip_message_step = progress.current_step
+                    else:
+                        # If no current step, get the first step from the schedule
+                        if campaign.drip_schedule:
+                            drip_message_step = campaign.drip_schedule.message_steps.order_by('order').first()
+                elif campaign.campaign_type == 'reminder':
+                    # For reminder campaigns, we need to find the appropriate reminder message
+                    # Get the most recent regular message to find the associated reminder_message
+                    recent_regular_message = BulkCampaignMessage.objects.filter(
+                        participant=participant,
+                        campaign=campaign,
+                        message_type='regular',
+                        reminder_message__isnull=False
+                    ).order_by('-created_at').first()
+                    
+                    if recent_regular_message and recent_regular_message.reminder_message:
+                        reminder_message = recent_regular_message.reminder_message
+                    else:
+                        # If no recent message found, try to get the first reminder message from the schedule
+                        if campaign.reminder_schedule:
+                            first_reminder_time = campaign.reminder_schedule.reminder_times.order_by(
+                                'days_before', 'days_before_relative', 'hours_before', 'minutes_before'
+                            ).first()
+                            if first_reminder_time:
+                                # Find the appropriate reminder message for the campaign channel
+                                if campaign.channel == 'sms':
+                                    reminder_message = first_reminder_time.messages.filter(sms_config__isnull=False).first()
+                                elif campaign.channel == 'email':
+                                    reminder_message = first_reminder_time.messages.filter(email_config__isnull=False).first()
+                                elif campaign.channel == 'voice':
+                                    reminder_message = first_reminder_time.messages.filter(voice_config__isnull=False).first()
+                                elif campaign.channel == 'chat':
+                                    reminder_message = first_reminder_time.messages.filter(chat_config__isnull=False).first()
+
+                # Create message safely with campaign-specific parameters
+                message = BulkCampaignMessage.create_message_safely(
                     participant=participant,
+                    campaign=campaign,
+                    message_type=message_type,
                     status='scheduled',
                     scheduled_for=scheduled_for,
-                    message_type=message_type,
+                    drip_message_step=drip_message_step,
+                    reminder_message=reminder_message,
                     message_group=message_group
                 )
                 
