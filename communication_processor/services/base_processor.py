@@ -9,6 +9,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from communication_processor.models import SQSMessage, CommunicationEvent, ChannelProcessor
+from external_models.models.external_references import Lead
 
 
 logger = logging.getLogger(__name__)

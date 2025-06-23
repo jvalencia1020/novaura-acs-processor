@@ -51,9 +51,8 @@ INSTALLED_APPS = [
     'bulkcampaign_processor',
     'communication_processor',
 
-    # Include these for ORM functionality, but we're not including views, etc.
+    # External models for ORM access to existing tables
     'external_models',
-
 ]
 
 MIDDLEWARE = [
@@ -213,5 +212,5 @@ LOGGING = {
 
 TWILIO_ACCOUNT_SID=os.getenv('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN=os.getenv('TWILIO_AUTH_TOKEN')
-
 AUTH_USER_MODEL = 'external_models.User'
+

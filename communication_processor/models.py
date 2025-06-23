@@ -34,6 +34,7 @@ class SQSMessage(models.Model):
     processed_at = models.DateTimeField(null=True, blank=True)
     
     class Meta:
+        managed = False
         db_table = 'communication_processor_sqs_message'
         indexes = [
             models.Index(fields=['status']),
@@ -152,6 +153,7 @@ class CommunicationEvent(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        managed = False
         db_table = 'communication_processor_communication_event'
         indexes = [
             models.Index(fields=['event_type']),
@@ -205,6 +207,7 @@ class ChannelProcessor(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        managed = False
         db_table = 'communication_processor_channel_processor'
         ordering = ['channel_type']
 

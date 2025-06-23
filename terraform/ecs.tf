@@ -403,12 +403,12 @@ resource "aws_ecs_service" "communication_processor_worker_service" {
   name            = "novaura-acs-communication-processor-worker-service"
   cluster         = aws_ecs_cluster.processor_cluster.id
   task_definition = aws_ecs_task_definition.communication_processor_worker_task.arn
-  desired_count   = 1
+  desired_count   = var.communication_worker_count
   launch_type     = "FARGATE"
 
   network_configuration {
     subnets         = data.aws_subnets.public.ids
-    security_groups = [aws_security_group.processor.id]
+    security_groups = [aws_security_group.ecs_service.id]
     assign_public_ip = true
   }
 

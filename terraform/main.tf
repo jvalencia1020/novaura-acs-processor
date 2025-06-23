@@ -67,6 +67,12 @@ variable "bulk_worker_count" {
   default     = 2
 }
 
+variable "communication_worker_count" {
+  description = "Number of worker tasks"
+  type        = number
+  default     = 2
+}
+
 variable "ecr_repository_url" {
   description = "ECR repository URL"
   type        = string
