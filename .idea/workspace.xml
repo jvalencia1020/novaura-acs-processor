@@ -6,6 +6,8 @@
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/ENHANCED_SQS_GUIDE.md" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/ENHANCED_SQS_GUIDE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/management/commands/build_sqs_message.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/management/commands/build_sqs_message.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -29,7 +31,7 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
-    "Python.process_bulk_campaigns.executor": "Debug",
+    "Python.process_bulk_campaigns.executor": "Run",
     "Python.process_due_messages.executor": "Run",
     "Python.run_bulk_campaign_processor.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
@@ -210,12 +212,12 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>743</line>
+          <line>744</line>
           <option name="timeStamp" value="29" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>722</line>
+          <line>723</line>
           <option name="timeStamp" value="33" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -245,7 +247,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>764</line>
+          <line>765</line>
           <option name="timeStamp" value="39" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">

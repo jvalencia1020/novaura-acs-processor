@@ -99,7 +99,13 @@ resource "aws_iam_role_policy" "ecs_task_role_policy" {
         ]
         Resource = [
           aws_sqs_queue.journey_events.arn,
-          aws_sqs_queue.journey_events_dlq.arn
+          aws_sqs_queue.journey_events_dlq.arn,
+          aws_sqs_queue.sms_events.arn,
+          aws_sqs_queue.sms_events_dlq.arn,
+          aws_sqs_queue.email_events.arn,
+          aws_sqs_queue.email_events_dlq.arn,
+          aws_sqs_queue.push_events.arn,
+          aws_sqs_queue.push_events_dlq.arn
         ]
       },
       {

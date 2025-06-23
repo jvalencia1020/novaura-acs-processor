@@ -4,20 +4,36 @@ from django.utils import timezone
 
 from communication_processor.services.base_processor import BaseChannelProcessor
 from communication_processor.models import CommunicationEvent
-from external_models.models.communications import Conversation, ConversationMessage, Participant
-from external_models.models.external_references import Lead
+from external_models.models.communications import ConversationMessage
+from external_models.models.nurturing_campaigns import LeadNurturingParticipant
+from communication_processor.utils.message_sender import MessageSender
 
+from shared_services import (
+    LeadMatchingService,
+    CampaignMatchingService,
+    ConversationService,
+    KeywordProcessingService,
+    AIAgentService
+)
 
 logger = logging.getLogger(__name__)
 
 
 class SMSProcessor(BaseChannelProcessor):
     """
-    Processor for SMS communication events from Twilio.
+    SMS processor that uses shared services for better code reuse.
     """
     
     def __init__(self, queue_url: str, config: Dict[str, Any] = None):
         super().__init__('sms', queue_url, config)
+        self.message_sender = MessageSender()
+        
+        # Initialize shared services
+        self.lead_matching_service = LeadMatchingService()
+        self.campaign_matching_service = CampaignMatchingService()
+        self.conversation_service = ConversationService()
+        self.keyword_processing_service = KeywordProcessingService(self.message_sender)
+        self.ai_agent_service = AIAgentService(self.message_sender)
     
     def validate_event(self, event_data: Dict[str, Any]) -> bool:
         """
@@ -46,7 +62,7 @@ class SMSProcessor(BaseChannelProcessor):
     
     def process_event(self, event_data: Dict[str, Any]) -> CommunicationEvent:
         """
-        Process an SMS event from Twilio.
+        Process an SMS event from Twilio using shared services.
         
         Args:
             event_data: The SMS event data
@@ -58,33 +74,37 @@ class SMSProcessor(BaseChannelProcessor):
         event_type = self._determine_event_type(event_data)
         
         # Extract phone numbers
-        from_number = event_data.get('From', '')
-        to_number = event_data.get('To', '')
+        from_number = event_data.get('from_number') or event_data.get('From', '')
+        to_number = event_data.get('to_number') or event_data.get('To', '')
         
-        # Try to find or create lead based on phone number
-        lead = self._get_lead_by_phone(from_number or to_number)
+        # Use shared service to find lead
+        lead = self.lead_matching_service.get_lead_from_event(event_data, from_number or to_number)
         
-        # Get or create conversation
-        conversation = self._get_or_create_conversation(event_data)
+        # Use shared service to get or create conversation
+        conversation = self.conversation_service.get_or_create_conversation(event_data, 'sms')
         
-        # Get or create participant
-        participant = self._get_or_create_participant(conversation, from_number or to_number)
+        # Use shared service to get or create participant
+        participant = self.conversation_service.get_or_create_participant(conversation, from_number or to_number, 'phone_number')
         
         # Create conversation message if this is a message event
         conversation_message = None
         if event_type in ['message_received', 'message_sent']:
-            conversation_message = self._create_conversation_message(
-                conversation, participant, event_data
+            conversation_message = self.conversation_service.create_conversation_message(
+                conversation, participant, event_data, 'sms'
             )
         
-        # Find associated nurturing campaign
-        nurturing_campaign = self._find_nurturing_campaign(event_data, lead)
+        # Use shared service to find associated nurturing campaign
+        nurturing_campaign = self.campaign_matching_service.find_nurturing_campaign_from_event(event_data, lead)
+        
+        # Process business logic based on event type
+        if event_type == 'message_received':
+            self._process_incoming_message(event_data, lead, nurturing_campaign, conversation_message)
         
         # Create communication event
         communication_event = CommunicationEvent.objects.create(
             event_type=event_type,
             channel_type=self.channel_type,
-            external_id=event_data['MessageSid'],
+            external_id=event_data.get('message_sid') or event_data.get('MessageSid'),
             lead=lead,
             conversation=conversation,
             conversation_message=conversation_message,
@@ -94,6 +114,151 @@ class SMSProcessor(BaseChannelProcessor):
         )
         
         return communication_event
+    
+    def _process_incoming_message(self, event_data: Dict[str, Any], lead, 
+                                nurturing_campaign, conversation_message):
+        """
+        Process incoming SMS message with business logic using shared services.
+        
+        Args:
+            event_data: The event data
+            lead: The lead (if found)
+            nurturing_campaign: The nurturing campaign (if found)
+            conversation_message: The conversation message
+        """
+        message_body = event_data.get('body', '') or event_data.get('Body', '')
+        from_number = event_data.get('from_number') or event_data.get('From', '')
+        
+        # Use shared service to check for reserved keywords
+        keyword_action = self.keyword_processing_service.check_reserved_keywords(message_body)
+        
+        if keyword_action:
+            # Use shared service to handle reserved keyword
+            self.keyword_processing_service.handle_reserved_keyword(
+                keyword_action, lead, nurturing_campaign, from_number, message_body, 'sms'
+            )
+        else:
+            # Process regular message
+            self._process_regular_message(event_data, lead, nurturing_campaign, conversation_message)
+    
+    def _process_regular_message(self, event_data: Dict[str, Any], lead, 
+                               nurturing_campaign, conversation_message):
+        """
+        Process regular (non-keyword) message.
+        
+        Args:
+            event_data: The event data
+            lead: The lead (if found)
+            nurturing_campaign: The nurturing campaign (if found)
+            conversation_message: The conversation message
+        """
+        message_body = event_data.get('body', '') or event_data.get('Body', '')
+        from_number = event_data.get('from_number') or event_data.get('From', '')
+        
+        # Update lead engagement metrics
+        if lead:
+            lead.last_contact_date = timezone.now()
+            lead.save(update_fields=['last_contact_date'])
+        
+        # Process campaign-specific logic
+        if nurturing_campaign:
+            self._process_campaign_response(event_data, lead, nurturing_campaign, conversation_message)
+        
+        # Check if agent mode is enabled and handle AI agent response using shared service
+        agent_mode = event_data.get('agent_mode', False)
+        if agent_mode:
+            self.ai_agent_service.handle_agent_response(
+                event_data, lead, nurturing_campaign, conversation_message, 'sms'
+            )
+        
+        # Log message context if available
+        message_context = event_data.get('message_context', {})
+        if message_context:
+            logger.info(f"Processed message from {from_number} in campaign '{message_context.get('campaign_name')}' step {message_context.get('step_number')}")
+        else:
+            logger.info(f"Processed regular message from {from_number}: {message_body[:50]}...")
+    
+    def _process_campaign_response(self, event_data: Dict[str, Any], lead, 
+                                 nurturing_campaign, conversation_message):
+        """
+        Process campaign-specific response logic.
+        
+        Args:
+            event_data: The event data
+            lead: The lead (if found)
+            nurturing_campaign: The nurturing campaign
+            conversation_message: The conversation message
+        """
+        if not lead:
+            return
+        
+        # Use shared service to get campaign participant
+        participant = self.campaign_matching_service.get_campaign_participant(lead, nurturing_campaign)
+        
+        if not participant:
+            return
+        
+        # Update participant engagement
+        participant.last_event_at = timezone.now()
+        participant.save(update_fields=['last_event_at'])
+        
+        # Handle journey-based campaigns
+        if nurturing_campaign.campaign_type == 'journey':
+            self._process_journey_response(event_data, participant, conversation_message)
+        
+        # Handle other campaign types (drip, reminder, blast)
+        elif nurturing_campaign.campaign_type in ['drip', 'reminder', 'blast']:
+            self._process_bulk_campaign_response(event_data, participant, conversation_message)
+    
+    def _process_journey_response(self, event_data: Dict[str, Any], participant: LeadNurturingParticipant, 
+                                conversation_message):
+        """
+        Process response for journey-based campaigns.
+        
+        Args:
+            event_data: The event data
+            participant: The campaign participant
+            conversation_message: The conversation message
+        """
+        # Create journey event for the response
+        from external_models.models.journeys import JourneyEvent, EventType
+        
+        try:
+            response_event_type = EventType.objects.get(name='response_received')
+            
+            JourneyEvent.objects.create(
+                participant=participant,
+                journey_step=participant.current_journey_step,
+                event_type=response_event_type,
+                metadata={
+                    'message_body': event_data.get('Body', ''),
+                    'conversation_message_id': conversation_message.id if conversation_message else None,
+                    'from_number': event_data.get('From', ''),
+                    'to_number': event_data.get('To', '')
+                },
+                created_by=participant.last_updated_by
+            )
+            
+            logger.info(f"Created journey event for response from {participant.lead}")
+            
+        except EventType.DoesNotExist:
+            logger.warning("EventType 'response_received' not found")
+    
+    def _process_bulk_campaign_response(self, event_data: Dict[str, Any], participant: LeadNurturingParticipant, 
+                                      conversation_message):
+        """
+        Process response for bulk campaigns (drip, reminder, blast).
+        
+        Args:
+            event_data: The event data
+            participant: The campaign participant
+            conversation_message: The conversation message
+        """
+        # Update campaign progress
+        participant.update_campaign_progress()
+        
+        # Log the response
+        logger.info(f"Processed bulk campaign response from {participant.lead}")
     
     def _determine_event_type(self, event_data: Dict[str, Any]) -> str:
         """
@@ -124,123 +289,6 @@ class SMSProcessor(BaseChannelProcessor):
         # Default to message received for inbound messages
         return 'message_received'
     
-    def _get_lead_by_phone(self, phone_number: str) -> Optional[Lead]:
-        """
-        Find a lead by phone number.
-        
-        Args:
-            phone_number: The phone number to search for
-            
-        Returns:
-            Lead or None
-        """
-        if not phone_number:
-            return None
-        
-        # Clean phone number
-        clean_phone = self._clean_phone_number(phone_number)
-        
-        try:
-            # This would need to be implemented based on your lead model structure
-            # For now, we'll return None and let the caller handle it
-            return None
-        except Lead.DoesNotExist:
-            return None
-    
-    def _get_or_create_conversation(self, event_data: Dict[str, Any]) -> Conversation:
-        """
-        Get or create a conversation for this SMS event.
-        
-        Args:
-            event_data: The event data
-            
-        Returns:
-            Conversation object
-        """
-        conversation_sid = event_data.get('ConversationSid')
-        
-        if conversation_sid:
-            try:
-                return Conversation.objects.get(twilio_sid=conversation_sid)
-            except Conversation.DoesNotExist:
-                pass
-        
-        # Create new conversation
-        conversation_data = {
-            'twilio_sid': conversation_sid or f"CONV_{event_data['MessageSid']}",
-            'account_sid': event_data.get('AccountSid'),
-            'messaging_service_sid': event_data.get('MessagingServiceSid'),
-            'channel': 'sms',
-            'state': 'active'
-        }
-        
-        return Conversation.objects.create(**conversation_data)
-    
-    def _get_or_create_participant(self, conversation: Conversation, phone_number: str) -> Participant:
-        """
-        Get or create a participant for this conversation.
-        
-        Args:
-            conversation: The conversation
-            phone_number: The phone number
-            
-        Returns:
-            Participant object
-        """
-        if not phone_number:
-            # Create a generic participant
-            participant_data = {
-                'participant_sid': f"PART_{conversation.twilio_sid}_{timezone.now().timestamp()}",
-                'conversation': conversation
-            }
-            return Participant.objects.create(**participant_data)
-        
-        # Try to find existing participant
-        try:
-            return Participant.objects.get(
-                conversation=conversation,
-                phone_number=phone_number
-            )
-        except Participant.DoesNotExist:
-            # Create new participant
-            participant_data = {
-                'participant_sid': f"PART_{conversation.twilio_sid}_{phone_number}",
-                'conversation': conversation,
-                'phone_number': phone_number
-            }
-            return Participant.objects.create(**participant_data)
-    
-    def _create_conversation_message(self, conversation: Conversation, participant: Participant, event_data: Dict[str, Any]) -> ConversationMessage:
-        """
-        Create a conversation message from the event data.
-        
-        Args:
-            conversation: The conversation
-            participant: The participant
-            event_data: The event data
-            
-        Returns:
-            ConversationMessage object
-        """
-        message_data = {
-            'message_sid': event_data['MessageSid'],
-            'sms_message_sid': event_data.get('SmsMessageSid'),
-            'sms_sid': event_data.get('SmsSid'),
-            'account_sid': event_data.get('AccountSid'),
-            'messaging_service_sid': event_data.get('MessagingServiceSid'),
-            'conversation': conversation,
-            'participant': participant,
-            'body': event_data.get('Body', ''),
-            'direction': event_data.get('Direction', 'inbound'),
-            'status': event_data.get('MessageStatus', 'received'),
-            'num_segments': event_data.get('NumSegments', 1),
-            'num_media': event_data.get('NumMedia', 0),
-            'channel': 'sms',
-            'raw_data': event_data
-        }
-        
-        return ConversationMessage.objects.create(**message_data)
-    
     def _extract_event_data(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Extract structured event data from the raw event.
@@ -251,37 +299,39 @@ class SMSProcessor(BaseChannelProcessor):
         Returns:
             Dict with structured event data
         """
-        return {
-            'message_sid': event_data.get('MessageSid'),
-            'from_number': event_data.get('From'),
-            'to_number': event_data.get('To'),
-            'body': event_data.get('Body'),
-            'direction': event_data.get('Direction'),
-            'status': event_data.get('MessageStatus'),
-            'num_segments': event_data.get('NumSegments'),
-            'num_media': event_data.get('NumMedia'),
-            'price': event_data.get('Price'),
-            'price_unit': event_data.get('PriceUnit'),
-            'error_code': event_data.get('ErrorCode'),
-            'error_message': event_data.get('ErrorMessage'),
+        extracted_data = {
+            'message_sid': event_data.get('message_sid') or event_data.get('MessageSid'),
+            'from_number': event_data.get('from_number') or event_data.get('From'),
+            'to_number': event_data.get('to_number') or event_data.get('To'),
+            'body': event_data.get('body') or event_data.get('Body'),
+            'direction': event_data.get('direction') or event_data.get('Direction'),
+            'status': event_data.get('status') or event_data.get('MessageStatus'),
+            'num_segments': event_data.get('num_segments') or event_data.get('NumSegments'),
+            'num_media': event_data.get('num_media') or event_data.get('NumMedia'),
+            'price': event_data.get('price') or event_data.get('Price'),
+            'price_unit': event_data.get('price_unit') or event_data.get('PriceUnit'),
+            'error_code': event_data.get('error_code') or event_data.get('ErrorCode'),
+            'error_message': event_data.get('error_message') or event_data.get('ErrorMessage'),
         }
-    
-    def _clean_phone_number(self, phone_number: str) -> str:
-        """
-        Clean a phone number for consistent formatting.
         
-        Args:
-            phone_number: The phone number to clean
-            
-        Returns:
-            Cleaned phone number
-        """
-        # Remove all non-digit characters except +
-        import re
-        cleaned = re.sub(r'[^\d+]', '', phone_number)
+        # Add enhanced context data
+        if 'message_context' in event_data:
+            extracted_data['message_context'] = event_data['message_context']
         
-        # Ensure it starts with +
-        if not cleaned.startswith('+'):
-            cleaned = '+' + cleaned
+        if 'metadata' in event_data:
+            extracted_data['metadata'] = event_data['metadata']
         
-        return cleaned 
+        if 'processing_hints' in event_data:
+            extracted_data['processing_hints'] = event_data['processing_hints']
+        
+        if 'timestamps' in event_data:
+            extracted_data['timestamps'] = event_data['timestamps']
+        
+        # Add agent mode data
+        if 'agent_mode' in event_data:
+            extracted_data['agent_mode'] = event_data['agent_mode']
+        
+        if 'agent_config' in event_data:
+            extracted_data['agent_config'] = event_data['agent_config']
+        
+        return extracted_data 

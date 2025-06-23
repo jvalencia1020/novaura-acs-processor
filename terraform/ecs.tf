@@ -258,6 +258,71 @@ resource "aws_ecs_task_definition" "bulk_campaign_worker_task" {
   }
 }
 
+# Communication Processor Worker Task
+resource "aws_ecs_task_definition" "communication_processor_worker_task" {
+  family                   = "novaura-acs-communication-processor-worker"
+  cpu                      = var.worker_cpu
+  memory                   = var.worker_memory
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+  
+  container_definitions = jsonencode([
+    {
+      name      = "communication-processor-worker"
+      image     = "${data.aws_ecr_repository.processor_repository.repository_url}:${var.image_tag}"
+      essential = true
+      command   = ["python", "communication_processor/worker.py"]
+      
+      environment = [
+        { name = "SERVICE_TYPE", value = "communication_processor_worker" },
+        { name = "WORKER_TYPE", value = "all" },
+        { name = "SMS_QUEUE_URL", value = aws_sqs_queue.sms_events.url },
+        { name = "EMAIL_QUEUE_URL", value = aws_sqs_queue.email_events.url },
+        { name = "DB_NAME", value = var.db_name },
+        { name = "DB_USER", value = var.db_user },
+        { name = "DB_HOST", value = var.db_host },
+        { name = "DB_PORT", value = "3306" },
+        { name = "DJANGO_SETTINGS_MODULE", value = "acs_personalization.settings.prod" }
+      ]
+      
+      secrets = [
+        { 
+          name = "DB_PASSWORD", 
+          valueFrom = "${var.db_password_arn}:DB_PASSWORD::" 
+        },
+        { 
+          name = "DJANGO_SECRET_KEY", 
+          valueFrom = "${var.django_secret_key_arn}:DJANGO_SECRET_KEY::" 
+        },
+        {
+          name = "TWILIO_ACCOUNT_SID",
+          valueFrom = "${var.twilio_credentials_arn}:TWILIO_ACCOUNT_SID::"
+        },
+        {
+          name = "TWILIO_AUTH_TOKEN",
+          valueFrom = "${var.twilio_credentials_arn}:TWILIO_AUTH_TOKEN::"
+        }
+      ]
+      
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.processor_logs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "communication-processor-worker"
+        }
+      }
+    }
+  ])
+  
+  tags = {
+    Name        = "Novaura ACS Communication Processor Worker Task"
+    Environment = var.environment
+  }
+}
+
 # Services
 resource "aws_ecs_service" "bulk_campaign_scheduler_service" {
   name            = "novaura-acs-bulk-campaign-scheduler"
@@ -329,6 +394,28 @@ resource "aws_ecs_service" "bulk_campaign_worker_service" {
   
   tags = {
     Name        = "Novaura ACS Bulk Campaign Worker Service"
+    Environment = var.environment
+  }
+}
+
+# Communication Processor Worker Service
+resource "aws_ecs_service" "communication_processor_worker_service" {
+  name            = "novaura-acs-communication-processor-worker-service"
+  cluster         = aws_ecs_cluster.processor_cluster.id
+  task_definition = aws_ecs_task_definition.communication_processor_worker_task.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = data.aws_subnets.public.ids
+    security_groups = [aws_security_group.processor.id]
+    assign_public_ip = true
+  }
+
+  depends_on = [aws_ecs_cluster.processor_cluster]
+  
+  tags = {
+    Name        = "Novaura ACS Communication Processor Worker Service"
     Environment = var.environment
   }
 } 

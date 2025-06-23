@@ -1,311 +1,303 @@
 # Communication Processor
 
-A Django app for processing SQS events from various communication channels (SMS, Email, Voice, Chat, etc.).
-
-## Overview
-
-The Communication Processor app provides a scalable, extensible system for processing communication events from different channels via AWS SQS queues. It supports multiple communication platforms and provides a unified interface for handling events across all channels.
+A Django app for processing SQS events from communication channels (SMS, Email, etc.) and integrating with nurturing campaigns.
 
 ## Features
 
-- **Multi-channel Support**: Process events from SMS, Email, Voice, Chat, and social media platforms
-- **SQS Integration**: Built-in AWS SQS message processing with retry logic
-- **Extensible Architecture**: Easy to add new communication channels
-- **Event Tracking**: Comprehensive tracking of all communication events
-- **Admin Interface**: Django admin interface for monitoring and configuration
-- **Management Commands**: CLI tools for setup and operation
-- **Error Handling**: Robust error handling and retry mechanisms
+### Core Functionality
+- **SQS Event Processing**: Consume and process events from AWS SQS queues
+- **Multi-Channel Support**: SMS (Twilio), Email, and extensible for other channels
+- **Database Persistence**: Track all communication events and processing status
+- **Admin Interface**: Monitor and manage communication events and channel processors
+- **Error Handling**: Comprehensive error handling with retry logic and dead letter queues
+
+### SMS Processing Features
+- **Reserved Keywords**: Handle opt-out, help, info, and confirmation requests
+- **Lead Matching**: Automatically match phone numbers to leads in your CRM
+- **Campaign Integration**: Link communication events to nurturing campaigns
+- **Conversation Management**: Create and manage Twilio conversations and participants
+- **Message Responses**: Send automated responses for reserved keywords
+
+### Reserved Keywords
+The SMS processor supports the following reserved keywords:
+
+| Keyword | Action | Description |
+|---------|--------|-------------|
+| `STOP` | Opt-out | Unsubscribe from current campaign |
+| `STOPALL` | Opt-out all | Unsubscribe from all campaigns |
+| `START` | Opt-in | Re-subscribe to current campaign |
+| `HELP` | Help | Send help information |
+| `INFO` | Info | Send campaign information |
+| `YES` | Confirm | Handle positive confirmation |
+| `NO` | Decline | Handle negative confirmation |
+| `UNSUBSCRIBE` | Opt-out | Alternative opt-out keyword |
+| `CANCEL` | Opt-out | Alternative opt-out keyword |
 
 ## Architecture
 
-### Core Components
+### Models
 
-1. **BaseChannelProcessor**: Abstract base class for all channel processors
-2. **Channel-Specific Processors**: Implementations for SMS, Email, etc.
-3. **ProcessorFactory**: Factory class for creating and managing processors
-4. **Models**: Database models for tracking events and configurations
-5. **Management Commands**: CLI tools for operation and setup
+#### CommunicationEvent
+Tracks all communication events processed by the system:
+- Event type and channel
+- External IDs and raw data
+- Lead and campaign associations
+- Processing status and timestamps
 
-### Data Flow
+#### ChannelProcessor
+Configuration for different communication channels:
+- Channel type and queue settings
+- Processor class and configuration
+- Status and monitoring
 
-1. SQS messages are received from communication platform queues
-2. Messages are validated and processed by channel-specific processors
-3. Communication events are created and linked to CRM entities
-4. Events trigger signals for additional processing (notifications, analytics, etc.)
+#### SQSMessage
+Tracks SQS message processing:
+- Message ID and receipt handle
+- Processing status and attempts
+- Error information and retry logic
 
-## Models
+### Services
 
-### SQSMessage
-Tracks SQS messages that have been processed by the communication processor.
+#### BaseChannelProcessor
+Abstract base class for all channel processors:
+- Common validation and processing logic
+- Error handling and logging
+- Database operations
 
-### CommunicationEvent
-Represents a communication event that was processed from an SQS message.
+#### SMSProcessor
+Handles SMS events from Twilio:
+- Reserved keyword processing
+- Lead matching and campaign integration
+- Conversation and participant management
+- Automated response sending
 
-### ChannelProcessor
-Configuration for different communication channel processors.
+#### EmailProcessor
+Handles email events:
+- Email parsing and validation
+- Lead matching by email address
+- Campaign integration
+
+#### ProcessorFactory
+Creates appropriate processor instances based on channel type.
+
+### Utilities
+
+#### MessageSender
+Handles sending response messages:
+- SMS sending via Twilio
+- Extensible for other platforms
+- Predefined message templates
 
 ## Setup
 
-### 1. Add to INSTALLED_APPS
+### Installation
 
-Add `communication_processor` to your Django settings:
-
+1. Add to INSTALLED_APPS:
 ```python
 INSTALLED_APPS = [
-    # ... other apps
+    ...
     'communication_processor',
+    ...
 ]
 ```
 
-### 2. Run Migrations
-
+2. Run migrations:
 ```bash
-python manage.py makemigrations communication_processor
 python manage.py migrate
 ```
 
-### 3. Configure Channel Processors
-
-Set up channel configurations using the management command:
-
-```bash
-# Set up SMS processor
-python manage.py setup_channel_processors --channel sms --queue-url https://sqs.region.amazonaws.com/account/sms-queue
-
-# Set up Email processor
-python manage.py setup_channel_processors --channel email --queue-url https://sqs.region.amazonaws.com/account/email-queue
-
-# List all configurations
-python manage.py setup_channel_processors --list
+3. Configure SQS queues in settings:
+```python
+SQS_QUEUES = {
+    'sms': {
+        'url': 'https://sqs.region.amazonaws.com/account/sms-queue',
+        'region': 'us-east-1',
+    },
+    'email': {
+        'url': 'https://sqs.region.amazonaws.com/account/email-queue',
+        'region': 'us-east-1',
+    },
+}
 ```
 
-### 4. Environment Variables
-
-Add the following environment variables to your settings:
-
-```bash
-# SQS Queue URLs (optional - can be set via management command)
-SMS_QUEUE_URL=https://sqs.region.amazonaws.com/account/sms-queue
-EMAIL_QUEUE_URL=https://sqs.region.amazonaws.com/account/email-queue
-
-# AWS Configuration
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_DEFAULT_REGION=us-east-1
-```
-
-## Usage
-
-### Running the Processor
-
-Start the communication processor:
-
-```bash
-# Process all active channels
-python manage.py run_communication_processor
-
-# Process specific channel
-python manage.py run_communication_processor --channel sms
-
-# Process with custom settings
-python manage.py run_communication_processor --batch-size 20 --interval 60
-
-# Dry run (for testing)
-python manage.py run_communication_processor --dry-run
+4. Configure Twilio settings (for SMS):
+```python
+TWILIO_ACCOUNT_SID = 'your_account_sid'
+TWILIO_AUTH_TOKEN = 'your_auth_token'
+TWILIO_PHONE_NUMBER = '+1234567890'
 ```
 
 ### Management Commands
 
-#### setup_channel_processors
-Configure channel processors:
-
+#### Setup Channel Processors
 ```bash
-# Set up a channel
-python manage.py setup_channel_processors --channel sms --queue-url <queue-url>
-
-# List configurations
-python manage.py setup_channel_processors --list
-
-# Enable/disable channels
-python manage.py setup_channel_processors --enable sms
-python manage.py setup_channel_processors --disable email
-
-# Delete configuration
-python manage.py setup_channel_processors --delete sms
+python manage.py setup_channel_processors
 ```
 
-#### run_communication_processor
-Run the communication processor:
-
+#### Run Communication Processor
 ```bash
-# Basic usage
-python manage.py run_communication_processor
-
-# Process specific channel
 python manage.py run_communication_processor --channel sms
-
-# Custom settings
-python manage.py run_communication_processor --batch-size 10 --interval 30 --max-cycles 100
-
-# Dry run
-python manage.py run_communication_processor --dry-run
 ```
 
-## Adding New Channels
-
-### 1. Create Processor Class
-
-Create a new processor class inheriting from `BaseChannelProcessor`:
-
-```python
-# communication_processor/services/whatsapp_processor.py
-from communication_processor.services.base_processor import BaseChannelProcessor
-
-class WhatsAppProcessor(BaseChannelProcessor):
-    def __init__(self, queue_url: str, config: Dict[str, Any] = None):
-        super().__init__('whatsapp', queue_url, config)
-    
-    def validate_event(self, event_data: Dict[str, Any]) -> bool:
-        # Implement validation logic
-        pass
-    
-    def process_event(self, event_data: Dict[str, Any]) -> CommunicationEvent:
-        # Implement processing logic
-        pass
-```
-
-### 2. Register Processor
-
-Register the processor in the factory:
-
-```python
-# In your app's ready() method or management command
-from communication_processor.services.processor_factory import ProcessorFactory
-from communication_processor.services.whatsapp_processor import WhatsAppProcessor
-
-ProcessorFactory.register_processor('whatsapp', WhatsAppProcessor)
-```
-
-### 3. Configure Channel
-
-Set up the channel configuration:
-
+#### Test SMS Processor
 ```bash
-python manage.py setup_channel_processors --channel whatsapp --queue-url <queue-url>
+python manage.py test_sms_processor --keyword STOP --phone +1234567890
 ```
 
-## Admin Interface
+## Usage
 
-The app provides a comprehensive Django admin interface for:
+### Processing SMS Events
 
-- **SQS Messages**: View and monitor SQS message processing
-- **Communication Events**: Browse and search communication events
-- **Channel Processors**: Configure and manage channel processors
+The SMS processor handles various types of events:
 
-Access the admin interface at `/admin/` after setting up a superuser.
+1. **Inbound Messages**: Process user responses and reserved keywords
+2. **Delivery Status**: Track message delivery and failure
+3. **Read Receipts**: Monitor message engagement
 
-## Monitoring and Logging
+### Reserved Keyword Processing
+
+When a user sends a reserved keyword:
+
+1. **Keyword Detection**: Processor checks message body against reserved keywords
+2. **Action Execution**: Appropriate action is taken (opt-out, help, etc.)
+3. **Database Update**: Lead and campaign status are updated
+4. **Response Sending**: Confirmation message is sent to user
+
+### Campaign Integration
+
+Communication events are automatically linked to nurturing campaigns:
+
+1. **Lead Matching**: Find lead by phone number or email
+2. **Campaign Detection**: Identify active campaigns for the lead
+3. **Event Creation**: Create communication event with campaign association
+4. **Journey Integration**: For journey campaigns, create journey events
+
+### Example Event Processing
+
+```python
+from communication_processor.services.sms_processor import SMSProcessor
+
+# Initialize processor
+processor = SMSProcessor('sms-queue-url')
+
+# Sample Twilio webhook data
+event_data = {
+    'MessageSid': 'SM1234567890abcdef',
+    'AccountSid': 'AC1234567890abcdef',
+    'From': '+1234567890',
+    'To': '+1987654321',
+    'Body': 'STOP',
+    'Direction': 'inbound',
+    'MessageStatus': 'received',
+}
+
+# Process the event
+communication_event = processor.process_event(event_data)
+```
+
+## Testing
+
+### Unit Tests
+```bash
+python manage.py test communication_processor.tests.test_sms_processor
+```
+
+### Integration Tests
+```bash
+python manage.py test communication_processor.tests.test_sms_processor.SMSProcessorIntegrationTestCase
+```
+
+### Manual Testing
+```bash
+# Test with STOP keyword
+python manage.py test_sms_processor --keyword STOP
+
+# Test with HELP keyword
+python manage.py test_sms_processor --keyword HELP
+
+# Test with regular message
+python manage.py test_sms_processor
+```
+
+## Monitoring
+
+### Admin Interface
+- View all communication events
+- Monitor processing status
+- Check channel processor configurations
+- Filter events by campaign, lead, or status
 
 ### Logging
+The processor logs all activities:
+- Event processing status
+- Reserved keyword actions
+- Lead matching results
+- Campaign integration
+- Error conditions
 
-The app uses Django's logging system. Configure logging in your settings:
+### Metrics
+Track key metrics:
+- Events processed per channel
+- Reserved keyword usage
+- Opt-out rates
+- Campaign engagement
+- Processing errors
 
+## Configuration
+
+### Environment Variables
+```bash
+# SQS Configuration
+SQS_QUEUE_URL_SMS=https://sqs.region.amazonaws.com/account/sms-queue
+SQS_QUEUE_URL_EMAIL=https://sqs.region.amazonaws.com/account/email-queue
+AWS_REGION=us-east-1
+
+# Twilio Configuration
+TWILIO_ACCOUNT_SID=your_account_sid
+TWILIO_AUTH_TOKEN=your_auth_token
+TWILIO_PHONE_NUMBER=+1234567890
+```
+
+### Settings
+```python
+# Communication Processor Settings
+COMMUNICATION_PROCESSOR = {
+    'max_retries': 3,
+    'visibility_timeout': 30,
+    'batch_size': 10,
+    'polling_interval': 5,
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Lead Not Found**: Ensure leads have correct phone numbers in the database
+2. **Campaign Not Linked**: Check that leads are participants in active campaigns
+3. **Message Sending Failed**: Verify Twilio credentials and phone number configuration
+4. **SQS Connection Issues**: Check AWS credentials and queue permissions
+
+### Debug Mode
+Enable debug logging:
 ```python
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-        },
-    },
     'loggers': {
         'communication_processor': {
+            'level': 'DEBUG',
             'handlers': ['console'],
-            'level': 'INFO',
         },
     },
 }
 ```
 
-### Metrics
-
-Track processing metrics through the admin interface or by querying the models:
-
-```python
-from communication_processor.models import CommunicationEvent, SQSMessage
-
-# Get processing statistics
-total_events = CommunicationEvent.objects.count()
-failed_messages = SQSMessage.objects.filter(status='failed').count()
-```
-
-## Error Handling
-
-The app includes comprehensive error handling:
-
-- **Retry Logic**: Failed messages are retried up to a configurable limit
-- **Error Tracking**: All errors are logged and tracked in the database
-- **Graceful Degradation**: Individual channel failures don't affect other channels
-
-## Testing
-
-### Unit Tests
-
-Run the test suite:
-
-```bash
-python manage.py test communication_processor
-```
-
-### Integration Tests
-
-Test with real SQS queues:
-
-```bash
-# Dry run to test configuration
-python manage.py run_communication_processor --dry-run
-
-# Test specific channel
-python manage.py run_communication_processor --channel sms --max-cycles 1
-```
-
-## Deployment
-
-### Docker
-
-The app is designed to work with Docker containers. Include in your Dockerfile:
-
-```dockerfile
-# Run migrations
-RUN python manage.py migrate
-
-# Start the processor
-CMD ["python", "manage.py", "run_communication_processor"]
-```
-
-### AWS ECS
-
-Deploy as an ECS service with appropriate IAM roles for SQS access.
-
-### Environment Variables
-
-Set required environment variables in your deployment environment:
-
-```bash
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_DEFAULT_REGION=us-east-1
-DATABASE_URL=your_database_url
-```
-
 ## Contributing
 
-1. Follow the existing code structure
-2. Add tests for new features
+1. Follow Django coding standards
+2. Add tests for new functionality
 3. Update documentation
-4. Ensure all tests pass
+4. Use meaningful commit messages
 
 ## License
 
-This app is part of the Novaura ACS Processor project. 
+This project is licensed under the MIT License. 
