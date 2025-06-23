@@ -8,6 +8,12 @@ DATABASES = {
     }
 }
 
+# AWS configuration for testing
+import os
+os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
+os.environ.setdefault('AWS_ACCESS_KEY_ID', 'test-access-key')
+os.environ.setdefault('AWS_SECRET_ACCESS_KEY', 'test-secret-key')
+
 # Disable password hashing for faster tests
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.MD5PasswordHasher',
