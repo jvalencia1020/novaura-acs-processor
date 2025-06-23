@@ -1,71 +1,169 @@
 from django.core.management.base import BaseCommand
-from communication_processor.worker import run_worker, run_sms_worker, run_email_worker
+from django.conf import settings
+import time
+import signal
+import sys
+import logging
+from typing import Dict, Any
+
+from communication_processor.services.processor_factory import ProcessorFactory
+from communication_processor.models import ChannelProcessor
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = 'Run the communication processor worker to process SQS messages'
+    help = 'Runs the SQS worker for communication processing'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.running = True
+        signal.signal(signal.SIGINT, self.handle_shutdown)
+        signal.signal(signal.SIGTERM, self.handle_shutdown)
+
+    def handle_shutdown(self, sig, frame):
+        logger.info('Shutting down communication processor worker...')
+        self.stdout.write(self.style.WARNING('Shutting down communication processor worker...'))
+        self.running = False
+
+    def handle(self, *args, **options):
+        logger.info('Starting Communication Processor Worker')
+        self.stdout.write(self.style.SUCCESS('Starting Communication Processor Worker'))
+        
+        worker_type = options.get('worker_type', 'all')
+        
+        if worker_type == 'sms':
+            self._run_sms_worker()
+        elif worker_type == 'email':
+            self._run_email_worker()
+        else:
+            self._run_all_workers()
+
+    def _run_all_workers(self):
+        """Run the main worker that processes all channels."""
+        while self.running:
+            try:
+                # Get all active processors from the database
+                processors = ProcessorFactory.get_all_processors()
+                
+                if not processors:
+                    logger.warning("No active processors found. Waiting 30 seconds before retry...")
+                    self.stdout.write(self.style.WARNING("No active processors found. Waiting 30 seconds before retry..."))
+                    time.sleep(30)
+                    continue
+                
+                # Process messages for each active processor
+                total_processed = 0
+                total_failed = 0
+                
+                for channel_type, processor in processors.items():
+                    try:
+                        logger.info(f"Processing messages for {channel_type} channel")
+                        stats = processor.process_messages(max_messages=10)
+                        
+                        total_processed += stats['processed']
+                        total_failed += stats['failed']
+                        
+                        if stats['processed'] > 0 or stats['failed'] > 0:
+                            logger.info(f"{channel_type}: Processed {stats['processed']}, Failed {stats['failed']}, Deleted {stats['deleted']}")
+                            self.stdout.write(f"{channel_type}: Processed {stats['processed']}, Failed {stats['failed']}, Deleted {stats['deleted']}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing {channel_type} messages: {e}")
+                        self.stderr.write(self.style.ERROR(f"Error processing {channel_type} messages: {e}"))
+                        total_failed += 1
+                
+                # Log summary
+                if total_processed > 0 or total_failed > 0:
+                    logger.info(f"Worker cycle complete: Total processed {total_processed}, Total failed {total_failed}")
+                    self.stdout.write(f"Worker cycle complete: Total processed {total_processed}, Total failed {total_failed}")
+                
+                # Sleep to avoid tight loop
+                time.sleep(5)
+                
+            except KeyboardInterrupt:
+                logger.info("Worker stopped by user")
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error in worker loop: {e}")
+                self.stderr.write(self.style.ERROR(f"Unexpected error in worker loop: {e}"))
+                time.sleep(30)  # Wait longer on unexpected errors
+
+    def _run_sms_worker(self):
+        """Run SMS-specific worker."""
+        logger.info("Starting SMS Worker")
+        self.stdout.write(self.style.SUCCESS("Starting SMS Worker"))
+        
+        # Get SMS queue URL from environment or use default
+        queue_url = getattr(settings, 'SMS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-sms-events')
+        
+        try:
+            processor = ProcessorFactory.get_processor('sms', queue_url)
+            
+            if not processor:
+                logger.error("Failed to create SMS processor")
+                self.stderr.write(self.style.ERROR("Failed to create SMS processor"))
+                return
+            
+            while self.running:
+                try:
+                    stats = processor.process_messages(max_messages=10)
+                    logger.info(f"SMS: Processed {stats['processed']}, Failed {stats['failed']}, Deleted {stats['deleted']}")
+                    self.stdout.write(f"SMS: Processed {stats['processed']}, Failed {stats['failed']}, Deleted {stats['deleted']}")
+                    time.sleep(5)
+                    
+                except KeyboardInterrupt:
+                    logger.info("SMS Worker stopped by user")
+                    break
+                except Exception as e:
+                    logger.error(f"Error in SMS worker: {e}")
+                    self.stderr.write(self.style.ERROR(f"Error in SMS worker: {e}"))
+                    time.sleep(30)
+                    
+        except Exception as e:
+            logger.error(f"Failed to initialize SMS worker: {e}")
+            self.stderr.write(self.style.ERROR(f"Failed to initialize SMS worker: {e}"))
+
+    def _run_email_worker(self):
+        """Run Email-specific worker."""
+        logger.info("Starting Email Worker")
+        self.stdout.write(self.style.SUCCESS("Starting Email Worker"))
+        
+        # Get Email queue URL from environment or use default
+        queue_url = getattr(settings, 'EMAIL_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-email-events')
+        
+        try:
+            processor = ProcessorFactory.get_processor('email', queue_url)
+            
+            if not processor:
+                logger.error("Failed to create Email processor")
+                self.stderr.write(self.style.ERROR("Failed to create Email processor"))
+                return
+            
+            while self.running:
+                try:
+                    stats = processor.process_messages(max_messages=10)
+                    logger.info(f"Email: Processed {stats['processed']}, Failed {stats['failed']}, Deleted {stats['deleted']}")
+                    self.stdout.write(f"Email: Processed {stats['processed']}, Failed {stats['failed']}, Deleted {stats['deleted']}")
+                    time.sleep(5)
+                    
+                except KeyboardInterrupt:
+                    logger.info("Email Worker stopped by user")
+                    break
+                except Exception as e:
+                    logger.error(f"Error in Email worker: {e}")
+                    self.stderr.write(self.style.ERROR(f"Error in Email worker: {e}"))
+                    time.sleep(30)
+                    
+        except Exception as e:
+            logger.error(f"Failed to initialize Email worker: {e}")
+            self.stderr.write(self.style.ERROR(f"Failed to initialize Email worker: {e}"))
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--worker-type',
             type=str,
-            choices=['all', 'sms', 'email'],
             default='all',
+            choices=['all', 'sms', 'email'],
             help='Type of worker to run (default: all)'
-        )
-        parser.add_argument(
-            '--sms-queue-url',
-            type=str,
-            help='SMS queue URL (overrides environment variable)'
-        )
-        parser.add_argument(
-            '--email-queue-url',
-            type=str,
-            help='Email queue URL (overrides environment variable)'
-        )
-        parser.add_argument(
-            '--max-messages',
-            type=int,
-            default=10,
-            help='Maximum number of messages to process per batch (default: 10)'
-        )
-        parser.add_argument(
-            '--sleep-time',
-            type=int,
-            default=5,
-            help='Sleep time between processing cycles in seconds (default: 5)'
-        )
-
-    def handle(self, *args, **options):
-        worker_type = options['worker_type']
-        
-        # Set environment variables if provided
-        if options['sms_queue_url']:
-            import os
-            os.environ['SMS_QUEUE_URL'] = options['sms_queue_url']
-        
-        if options['email_queue_url']:
-            import os
-            os.environ['EMAIL_QUEUE_URL'] = options['email_queue_url']
-        
-        self.stdout.write(
-            self.style.SUCCESS(f'Starting Communication Processor Worker (Type: {worker_type})')
-        )
-        
-        try:
-            if worker_type == 'sms':
-                run_sms_worker()
-            elif worker_type == 'email':
-                run_email_worker()
-            else:
-                run_worker()
-                
-        except KeyboardInterrupt:
-            self.stdout.write(
-                self.style.WARNING('Worker stopped by user')
-            )
-        except Exception as e:
-            self.stdout.write(
-                self.style.ERROR(f'Worker failed: {e}')
-            )
-            raise 
+        ) 

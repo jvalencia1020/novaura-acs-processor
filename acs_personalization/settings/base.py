@@ -151,6 +151,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 JOURNEY_EVENTS_QUEUE_URL = os.getenv('JOURNEY_EVENTS_QUEUE_URL')
 JOURNEY_PROCESSOR_LOG_LEVEL = os.getenv('JOURNEY_PROCESSOR_LOG_LEVEL', 'INFO')
 
+# SQS Queue URLs for communication processor
+SMS_QUEUE_URL = os.getenv('SMS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-sms-events')
+EMAIL_QUEUE_URL = os.getenv('EMAIL_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-email-events')
+
 # Redis cache for locking if needed
 CACHES = {
     'default': {

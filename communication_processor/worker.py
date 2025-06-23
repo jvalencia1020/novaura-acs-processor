@@ -7,10 +7,16 @@ using the appropriate channel processors.
 """
 
 import os
+import sys
 import time
 import logging
 import django
 from typing import Dict, Any
+
+# Add the current working directory to Python path so Django can find the acs_personalization module
+current_dir = os.getcwd()
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 # Setup Django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'acs_personalization.settings.prod')

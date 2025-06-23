@@ -91,7 +91,7 @@ case "$SERVICE_TYPE" in
     ;;
   "communication_processor_worker")
     echo "Starting communication processor worker..."
-    exec python communication_processor/worker.py
+    exec python manage.py run_communication_worker
     ;;
   *)
     echo "Unknown service type: $SERVICE_TYPE"
