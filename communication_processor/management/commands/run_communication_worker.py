@@ -41,6 +41,9 @@ class Command(BaseCommand):
 
     def _run_all_workers(self):
         """Run the main worker that processes all channels."""
+        # Monitor queue status
+        self._monitor_queue_status()
+        
         while self.running:
             try:
                 # Get all active processors from the database
@@ -88,6 +91,34 @@ class Command(BaseCommand):
                 logger.error(f"Unexpected error in worker loop: {e}")
                 self.stderr.write(self.style.ERROR(f"Unexpected error in worker loop: {e}"))
                 time.sleep(30)  # Wait longer on unexpected errors
+
+    def _monitor_queue_status(self):
+        """Monitor the status of all queues."""
+        try:
+            import boto3
+            sqs = boto3.client('sqs')
+            
+            processors = ProcessorFactory.get_all_processors()
+            for channel_type, processor in processors.items():
+                try:
+                    response = sqs.get_queue_attributes(
+                        QueueUrl=processor.queue_url,
+                        AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+                    )
+                    
+                    visible_messages = int(response['Attributes'].get('ApproximateNumberOfMessages', 0))
+                    in_flight_messages = int(response['Attributes'].get('ApproximateNumberOfMessagesNotVisible', 0))
+                    
+                    logger.info(f"{channel_type.upper()} Queue Status:")
+                    logger.info(f"  Visible messages: {visible_messages}")
+                    logger.info(f"  In-flight messages: {in_flight_messages}")
+                    self.stdout.write(f"{channel_type.upper()} Queue: {visible_messages} visible, {in_flight_messages} in-flight")
+                    
+                except Exception as e:
+                    logger.error(f"Error checking {channel_type} queue status: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error monitoring queue status: {e}")
 
     def _run_sms_worker(self):
         """Run SMS-specific worker."""

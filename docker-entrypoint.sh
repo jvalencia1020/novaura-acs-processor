@@ -91,6 +91,9 @@ case "$SERVICE_TYPE" in
     ;;
   "communication_processor_worker")
     echo "Starting communication processor worker..."
+    echo "Setting up channel processors..."
+    python manage.py setup_channel_processors
+    echo "Starting communication processor worker..."
     exec python manage.py run_communication_worker
     ;;
   *)

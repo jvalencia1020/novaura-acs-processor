@@ -141,62 +141,90 @@ class BaseChannelProcessor(ABC):
         }
         
         messages = self.receive_messages(max_messages)
+        logger.info(f"Processing {len(messages)} messages for {self.channel_type} channel")
+        
+        if not messages:
+            logger.info(f"No messages received from {self.channel_type} queue")
+            return stats
         
         for message in messages:
             try:
+                logger.info(f"Processing message {message['MessageId']} for {self.channel_type}")
+                
                 # Parse message body
                 message_body = json.loads(message['Body'])
+                logger.debug(f"Message body: {message_body}")
                 
                 # Create SQS message record
-                sqs_message = SQSMessage.objects.create(
-                    message_id=message['MessageId'],
-                    receipt_handle=message['ReceiptHandle'],
-                    queue_url=self.queue_url,
-                    message_body=message_body,
-                    status='processing'
-                )
+                try:
+                    sqs_message = SQSMessage.objects.create(
+                        message_id=message['MessageId'],
+                        receipt_handle=message['ReceiptHandle'],
+                        queue_url=self.queue_url,
+                        message_body=message_body,
+                        status='processing'
+                    )
+                    logger.info(f"Created SQS message record: {sqs_message.id}")
+                except Exception as e:
+                    logger.error(f"Failed to create SQS message record: {e}")
+                    stats['failed'] += 1
+                    continue
                 
                 # Process the event
-                if self.validate_event(message_body):
-                    communication_event = self.process_event(message_body)
-                    communication_event.sqs_message = sqs_message
-                    communication_event.save()
+                try:
+                    if self.validate_event(message_body):
+                        logger.info(f"Message {message['MessageId']} passed validation")
+                        
+                        communication_event = self.process_event(message_body)
+                        communication_event.sqs_message = sqs_message
+                        communication_event.save()
+                        logger.info(f"Created communication event: {communication_event.id}")
+                        
+                        # Mark SQS message as completed
+                        sqs_message.status = 'completed'
+                        sqs_message.processed_at = timezone.now()
+                        sqs_message.save()
+                        logger.info(f"Marked SQS message {sqs_message.id} as completed")
+                        
+                        # Delete from SQS queue
+                        if self.delete_message(message['ReceiptHandle']):
+                            stats['deleted'] += 1
+                            logger.info(f"Deleted message {message['MessageId']} from SQS queue")
+                        else:
+                            logger.warning(f"Failed to delete message {message['MessageId']} from SQS queue")
+                        
+                        stats['processed'] += 1
+                        logger.info(f"Successfully processed {self.channel_type} event: {communication_event.external_id}")
+                        
+                    else:
+                        logger.warning(f"Message {message['MessageId']} failed validation")
+                        # Mark as failed due to validation
+                        sqs_message.status = 'failed'
+                        sqs_message.error_message = 'Event validation failed'
+                        sqs_message.processed_at = timezone.now()
+                        sqs_message.save()
+                        stats['failed'] += 1
+                        
+                except Exception as e:
+                    logger.error(f"Error processing message {message['MessageId']}: {e}", exc_info=True)
                     
-                    # Mark SQS message as completed
-                    sqs_message.status = 'completed'
-                    sqs_message.processed_at = timezone.now()
-                    sqs_message.save()
+                    # Update SQS message status
+                    try:
+                        sqs_message.status = 'failed'
+                        sqs_message.error_message = str(e)
+                        sqs_message.processed_at = timezone.now()
+                        sqs_message.save()
+                        logger.info(f"Updated SQS message {sqs_message.id} status to failed")
+                    except Exception as save_error:
+                        logger.error(f"Failed to update SQS message status: {save_error}")
                     
-                    # Delete from SQS queue
-                    if self.delete_message(message['ReceiptHandle']):
-                        stats['deleted'] += 1
-                    
-                    stats['processed'] += 1
-                    logger.info(f"Successfully processed {self.channel_type} event: {communication_event.external_id}")
-                    
-                else:
-                    # Mark as failed due to validation
-                    sqs_message.status = 'failed'
-                    sqs_message.error_message = 'Event validation failed'
-                    sqs_message.processed_at = timezone.now()
-                    sqs_message.save()
                     stats['failed'] += 1
                     
             except Exception as e:
-                logger.error(f"Error processing {self.channel_type} message: {e}")
-                
-                # Update SQS message status
-                try:
-                    sqs_message = SQSMessage.objects.get(message_id=message['MessageId'])
-                    sqs_message.status = 'failed'
-                    sqs_message.error_message = str(e)
-                    sqs_message.processed_at = timezone.now()
-                    sqs_message.save()
-                except SQSMessage.DoesNotExist:
-                    pass
-                
+                logger.error(f"Error processing {self.channel_type} message: {e}", exc_info=True)
                 stats['failed'] += 1
         
+        logger.info(f"Processing complete for {self.channel_type}: {stats}")
         return stats
     
     def get_or_create_conversation(self, external_id: str, **kwargs) -> Optional[Any]:
