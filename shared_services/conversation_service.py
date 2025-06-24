@@ -2,6 +2,7 @@ import logging
 from typing import Optional, Dict, Any
 from django.utils import timezone
 from external_models.models.communications import Conversation, ConversationMessage, Participant
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class ConversationService:
         if not identifier:
             # Create a generic participant
             participant_data = {
-                'participant_sid': f"PART_{conversation.twilio_sid}_{timezone.now().timestamp()}",
+                'participant_sid': f"PART_{int(timezone.now().timestamp())}",
                 'conversation': conversation
             }
             return Participant.objects.create(**participant_data)
@@ -77,9 +78,13 @@ class ConversationService:
                     phone_number=identifier
                 )
         except Participant.DoesNotExist:
-            # Create new participant
+            # Create new participant with shorter participant_sid
+            # Use timestamp + hash of identifier to keep it short but unique
+            identifier_hash = hashlib.md5(identifier.encode()).hexdigest()[:8]
+            participant_sid = f"PART_{int(timezone.now().timestamp())}_{identifier_hash}"
+            
             participant_data = {
-                'participant_sid': f"PART_{conversation.twilio_sid}_{identifier}",
+                'participant_sid': participant_sid,
                 'conversation': conversation,
                 identifier_type: identifier
             }

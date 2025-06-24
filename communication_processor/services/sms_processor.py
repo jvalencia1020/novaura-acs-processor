@@ -45,103 +45,119 @@ class SMSProcessor(BaseChannelProcessor):
         Returns:
             bool: True if valid, False otherwise
         """
-        logger.info(f"Validating SMS event: {event_data.get('MessageSid', 'No MessageSid')}")
+        # Check for required fields (support both camelCase and snake_case)
+        message_sid = event_data.get('MessageSid') or event_data.get('message_sid')
+        account_sid = event_data.get('AccountSid') or event_data.get('account_sid')
         
-        required_fields = ['MessageSid', 'AccountSid']
-        
-        # Check for required fields
-        for field in required_fields:
-            if field not in event_data:
-                logger.warning(f"SMS event missing required field: {field}")
-                return False
-        
-        # Validate MessageSid format (should start with SM)
-        if not event_data['MessageSid'].startswith('SM'):
-            logger.warning(f"Invalid MessageSid format: {event_data['MessageSid']}")
+        if not message_sid:
+            logger.warning("SMS event missing required field: MessageSid/message_sid")
+            return False
+            
+        if not account_sid:
+            logger.warning("SMS event missing required field: AccountSid/account_sid")
             return False
         
-        logger.info(f"SMS event validation passed for MessageSid: {event_data['MessageSid']}")
+        # Validate MessageSid format (should start with SM)
+        if not message_sid.startswith('SM'):
+            logger.warning(f"Invalid MessageSid format: {message_sid}")
+            return False
+        
         return True
     
-    def process_event(self, event_data: Dict[str, Any]) -> CommunicationEvent:
+    def process_event(self, event_data: Dict[str, Any], sqs_message=None) -> CommunicationEvent:
         """
         Process an SMS event from Twilio using shared services.
         
         Args:
             event_data: The SMS event data
+            sqs_message: The SQS message record (optional)
             
         Returns:
             CommunicationEvent: The processed event
         """
-        logger.info(f"Processing SMS event: {event_data.get('MessageSid', 'No MessageSid')}")
+        # Normalize field names to handle both camelCase and snake_case
+        message_sid = event_data.get('MessageSid') or event_data.get('message_sid')
         
         # Determine event type based on Twilio event
         event_type = self._determine_event_type(event_data)
-        logger.info(f"Determined event type: {event_type}")
         
-        # Extract phone numbers
+        # Extract phone numbers (support both formats)
         from_number = event_data.get('from_number') or event_data.get('From', '')
         to_number = event_data.get('to_number') or event_data.get('To', '')
-        logger.info(f"Phone numbers - From: {from_number}, To: {to_number}")
         
         # Use shared service to find lead
         lead = self.lead_matching_service.get_lead_from_event(event_data, from_number or to_number)
-        if lead:
-            logger.info(f"Found lead: {lead.id}")
-        else:
-            logger.info("No lead found for this event")
         
-        # Use shared service to get or create conversation
-        conversation = self.conversation_service.get_or_create_conversation(event_data, 'sms')
-        if conversation:
-            logger.info(f"Got/created conversation: {conversation.id}")
-        else:
-            logger.info("No conversation created")
-        
-        # Use shared service to get or create participant
-        participant = self.conversation_service.get_or_create_participant(conversation, from_number or to_number, 'phone_number')
-        if participant:
-            logger.info(f"Got/created participant: {participant.id}")
-        else:
-            logger.info("No participant created")
-        
-        # Create conversation message if this is a message event
+        # Check if conversation and message already exist (from webhook)
+        conversation = None
         conversation_message = None
-        if event_type in ['message_received', 'message_sent']:
+        participant = None
+        
+        # Try to get existing conversation and message from the event data
+        conversation_id = event_data.get('conversation_id')
+        conversation_message_id = event_data.get('conversation_message_id')
+        participant_id = event_data.get('participant_id')
+        
+        if conversation_id and conversation_message_id:
+            try:
+                from external_models.models.communications import Conversation, ConversationMessage, Participant
+                
+                # Get existing conversation
+                conversation = Conversation.objects.get(id=conversation_id)
+                
+                # Get existing conversation message
+                conversation_message = ConversationMessage.objects.get(id=conversation_message_id)
+                
+                # Get existing participant
+                if participant_id:
+                    participant = Participant.objects.get(id=participant_id)
+                
+            except (Conversation.DoesNotExist, ConversationMessage.DoesNotExist, Participant.DoesNotExist) as e:
+                logger.warning(f"Could not find existing records: {e}")
+                # Fall back to creating new ones
+                conversation = None
+                conversation_message = None
+                participant = None
+        
+        # If we don't have existing records, create them
+        if not conversation:
+            conversation = self.conversation_service.get_or_create_conversation(event_data, 'sms')
+        
+        if not participant:
+            participant = self.conversation_service.get_or_create_participant(conversation, from_number or to_number, 'phone_number')
+        
+        # Only create conversation message if it doesn't exist and this is a message event
+        if not conversation_message and event_type in ['message_received', 'message_sent']:
             conversation_message = self.conversation_service.create_conversation_message(
                 conversation, participant, event_data, 'sms'
             )
-            if conversation_message:
-                logger.info(f"Created conversation message: {conversation_message.id}")
-            else:
-                logger.info("No conversation message created")
         
         # Use shared service to find associated nurturing campaign
         nurturing_campaign = self.campaign_matching_service.find_nurturing_campaign_from_event(event_data, lead)
-        if nurturing_campaign:
-            logger.info(f"Found nurturing campaign: {nurturing_campaign.id}")
-        else:
-            logger.info("No nurturing campaign found")
         
         # Process business logic based on event type
         if event_type == 'message_received':
-            logger.info("Processing incoming message business logic")
             self._process_incoming_message(event_data, lead, nurturing_campaign, conversation_message)
         
         # Create communication event
         try:
-            communication_event = CommunicationEvent.objects.create(
-                event_type=event_type,
-                channel_type=self.channel_type,
-                external_id=event_data.get('message_sid') or event_data.get('MessageSid'),
-                lead=lead,
-                conversation=conversation,
-                conversation_message=conversation_message,
-                nurturing_campaign=nurturing_campaign,
-                event_data=self._extract_event_data(event_data),
-                raw_data=event_data
-            )
-            logger.info(f"Created communication event: {communication_event.id}")
+            communication_event_data = {
+                'event_type': event_type,
+                'channel_type': self.channel_type,
+                'external_id': message_sid,
+                'lead': lead,
+                'conversation': conversation,
+                'conversation_message': conversation_message,
+                'nurturing_campaign': nurturing_campaign,
+                'event_data': self._extract_event_data(event_data),
+                'raw_data': event_data
+            }
+            
+            # Add sqs_message if provided
+            if sqs_message:
+                communication_event_data['sqs_message'] = sqs_message
+            
+            communication_event = CommunicationEvent.objects.create(**communication_event_data)
             return communication_event
         except Exception as e:
             logger.error(f"Failed to create communication event: {e}", exc_info=True)
@@ -160,14 +176,15 @@ class SMSProcessor(BaseChannelProcessor):
         """
         message_body = event_data.get('body', '') or event_data.get('Body', '')
         from_number = event_data.get('from_number') or event_data.get('From', '')
+        to_number = event_data.get('to_number') or event_data.get('To', '')  # This is the Twilio number
         
         # Use shared service to check for reserved keywords
         keyword_action = self.keyword_processing_service.check_reserved_keywords(message_body)
         
         if keyword_action:
-            # Use shared service to handle reserved keyword
+            # Use shared service to handle reserved keyword, passing the Twilio number
             self.keyword_processing_service.handle_reserved_keyword(
-                keyword_action, lead, nurturing_campaign, from_number, message_body, 'sms'
+                keyword_action, lead, nurturing_campaign, from_number, message_body, 'sms', to_number
             )
         else:
             # Process regular message
@@ -202,13 +219,6 @@ class SMSProcessor(BaseChannelProcessor):
             self.ai_agent_service.handle_agent_response(
                 event_data, lead, nurturing_campaign, conversation_message, 'sms'
             )
-        
-        # Log message context if available
-        message_context = event_data.get('message_context', {})
-        if message_context:
-            logger.info(f"Processed message from {from_number} in campaign '{message_context.get('campaign_name')}' step {message_context.get('step_number')}")
-        else:
-            logger.info(f"Processed regular message from {from_number}: {message_body[:50]}...")
     
     def _process_campaign_response(self, event_data: Dict[str, Any], lead, 
                                  nurturing_campaign, conversation_message):
@@ -271,8 +281,6 @@ class SMSProcessor(BaseChannelProcessor):
                 created_by=participant.last_updated_by
             )
             
-            logger.info(f"Created journey event for response from {participant.lead}")
-            
         except EventType.DoesNotExist:
             logger.warning("EventType 'response_received' not found")
     
@@ -288,9 +296,6 @@ class SMSProcessor(BaseChannelProcessor):
         """
         # Update campaign progress
         participant.update_campaign_progress()
-        
-        # Log the response
-        logger.info(f"Processed bulk campaign response from {participant.lead}")
     
     def _determine_event_type(self, event_data: Dict[str, Any]) -> str:
         """

@@ -10,7 +10,7 @@ class SQSMessage(models.Model):
     Tracks SQS messages that have been processed by the communication processor.
     """
     message_id = models.CharField(max_length=255, unique=True, help_text="SQS Message ID")
-    receipt_handle = models.CharField(max_length=255, help_text="SQS Receipt Handle")
+    receipt_handle = models.TextField(help_text="SQS Receipt Handle")
     queue_url = models.URLField(help_text="SQS Queue URL")
     message_body = models.JSONField(help_text="Raw message body from SQS")
     

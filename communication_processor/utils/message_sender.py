@@ -65,13 +65,14 @@ class MessageSender:
             logger.error(f"Error sending SMS to {to_number}: {e}")
             return False
     
-    def send_opt_out_confirmation(self, to_number: str, campaign_name: Optional[str] = None) -> bool:
+    def send_opt_out_confirmation(self, to_number: str, campaign_name: Optional[str] = None, from_number: Optional[str] = None) -> bool:
         """
         Send opt-out confirmation message.
         
         Args:
             to_number: The recipient's phone number
             campaign_name: Optional campaign name
+            from_number: The sender's phone number (optional)
             
         Returns:
             bool: True if sent successfully, False otherwise
@@ -80,14 +81,15 @@ class MessageSender:
         if campaign_name:
             message = f"You have been unsubscribed from '{campaign_name}'. You will no longer receive messages."
         
-        return self.send_sms(to_number, message)
+        return self.send_sms(to_number, message, from_number)
     
-    def send_help_message(self, to_number: str) -> bool:
+    def send_help_message(self, to_number: str, from_number: Optional[str] = None) -> bool:
         """
         Send help message.
         
         Args:
             to_number: The recipient's phone number
+            from_number: The sender's phone number (optional)
             
         Returns:
             bool: True if sent successfully, False otherwise
@@ -98,15 +100,16 @@ class MessageSender:
             "Reply INFO for more information."
         )
         
-        return self.send_sms(to_number, message)
+        return self.send_sms(to_number, message, from_number)
     
-    def send_info_message(self, to_number: str, campaign_name: Optional[str] = None) -> bool:
+    def send_info_message(self, to_number: str, campaign_name: Optional[str] = None, from_number: Optional[str] = None) -> bool:
         """
         Send info message.
         
         Args:
             to_number: The recipient's phone number
             campaign_name: Optional campaign name
+            from_number: The sender's phone number (optional)
             
         Returns:
             bool: True if sent successfully, False otherwise
@@ -115,15 +118,16 @@ class MessageSender:
         if campaign_name:
             message += f" Current campaign: {campaign_name}"
         
-        return self.send_sms(to_number, message)
+        return self.send_sms(to_number, message, from_number)
     
-    def send_opt_in_confirmation(self, to_number: str, campaign_name: Optional[str] = None) -> bool:
+    def send_opt_in_confirmation(self, to_number: str, campaign_name: Optional[str] = None, from_number: Optional[str] = None) -> bool:
         """
         Send opt-in confirmation message.
         
         Args:
             to_number: The recipient's phone number
             campaign_name: Optional campaign name
+            from_number: The sender's phone number (optional)
             
         Returns:
             bool: True if sent successfully, False otherwise
@@ -132,4 +136,4 @@ class MessageSender:
         if campaign_name:
             message = f"You have been successfully subscribed to '{campaign_name}'."
         
-        return self.send_sms(to_number, message) 
+        return self.send_sms(to_number, message, from_number) 

@@ -44,12 +44,13 @@ class EmailProcessor(BaseChannelProcessor):
         
         return True
     
-    def process_event(self, event_data: Dict[str, Any]) -> CommunicationEvent:
+    def process_event(self, event_data: Dict[str, Any], sqs_message=None) -> CommunicationEvent:
         """
         Process an email event.
         
         Args:
             event_data: The email event data
+            sqs_message: The SQS message record (optional)
             
         Returns:
             CommunicationEvent: The processed event
@@ -81,17 +82,23 @@ class EmailProcessor(BaseChannelProcessor):
         nurturing_campaign = self._find_nurturing_campaign(event_data, lead)
         
         # Create communication event
-        communication_event = CommunicationEvent.objects.create(
-            event_type=event_type,
-            channel_type=self.channel_type,
-            external_id=event_data['message_id'],
-            lead=lead,
-            conversation=conversation,
-            conversation_message=conversation_message,
-            nurturing_campaign=nurturing_campaign,
-            event_data=self._extract_event_data(event_data),
-            raw_data=event_data
-        )
+        communication_event_data = {
+            'event_type': event_type,
+            'channel_type': self.channel_type,
+            'external_id': event_data['message_id'],
+            'lead': lead,
+            'conversation': conversation,
+            'conversation_message': conversation_message,
+            'nurturing_campaign': nurturing_campaign,
+            'event_data': self._extract_event_data(event_data),
+            'raw_data': event_data
+        }
+        
+        # Add sqs_message if provided
+        if sqs_message:
+            communication_event_data['sqs_message'] = sqs_message
+        
+        communication_event = CommunicationEvent.objects.create(**communication_event_data)
         
         return communication_event
     

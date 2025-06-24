@@ -53,7 +53,8 @@ class KeywordProcessingService:
     
     def handle_reserved_keyword(self, action: str, lead: Optional[Lead], 
                               nurturing_campaign: Optional[LeadNurturingCampaign],
-                              contact_info: str, message_body: str, channel: str = 'sms') -> bool:
+                              contact_info: str, message_body: str, channel: str = 'sms', 
+                              twilio_number: Optional[str] = None) -> bool:
         """
         Handle reserved keyword actions.
         
@@ -64,23 +65,23 @@ class KeywordProcessingService:
             contact_info: The contact information (phone, email, etc.)
             message_body: The original message body
             channel: The communication channel
+            twilio_number: The Twilio number to send from (for SMS)
             
         Returns:
             bool: True if action was handled successfully
         """
-        logger.info(f"Processing reserved keyword: {message_body} -> {action}")
         
         try:
             if action == 'opt_out':
-                return self._handle_opt_out(lead, nurturing_campaign, contact_info, channel)
+                return self._handle_opt_out(lead, nurturing_campaign, contact_info, channel, twilio_number)
             elif action == 'opt_out_all':
-                return self._handle_opt_out_all(lead, contact_info, channel)
+                return self._handle_opt_out_all(lead, contact_info, channel, twilio_number)
             elif action == 'opt_in':
-                return self._handle_opt_in(lead, nurturing_campaign, contact_info, channel)
+                return self._handle_opt_in(lead, nurturing_campaign, contact_info, channel, twilio_number)
             elif action == 'help':
-                return self._handle_help_request(lead, nurturing_campaign, contact_info, channel)
+                return self._handle_help_request(lead, nurturing_campaign, contact_info, channel, twilio_number)
             elif action == 'info':
-                return self._handle_info_request(lead, nurturing_campaign, contact_info, channel)
+                return self._handle_info_request(lead, nurturing_campaign, contact_info, channel, twilio_number)
             elif action in ['confirm', 'decline']:
                 return self._handle_confirmation(action, lead, nurturing_campaign, contact_info, channel)
             else:
@@ -92,7 +93,7 @@ class KeywordProcessingService:
             return False
     
     def _handle_opt_out(self, lead: Optional[Lead], nurturing_campaign: Optional[LeadNurturingCampaign], 
-                       contact_info: str, channel: str) -> bool:
+                       contact_info: str, channel: str, twilio_number: Optional[str] = None) -> bool:
         """
         Handle opt-out request.
         
@@ -101,6 +102,7 @@ class KeywordProcessingService:
             nurturing_campaign: The nurturing campaign (if found)
             contact_info: The contact information
             channel: The communication channel
+            twilio_number: The Twilio number to send from (for SMS)
             
         Returns:
             bool: True if opt-out was successful
@@ -117,15 +119,12 @@ class KeywordProcessingService:
                 if participant:
                     try:
                         participant.opt_out()
-                        logger.info(f"Successfully opted out {contact_info} from campaign {nurturing_campaign.name}")
                         
                         # Send opt-out confirmation message
                         if self.message_sender:
-                            success = self.message_sender.send_opt_out_confirmation(contact_info, nurturing_campaign.name, channel)
-                            if success:
-                                logger.info(f"Sent opt-out confirmation to {contact_info}")
-                            else:
-                                logger.error(f"Failed to send opt-out confirmation to {contact_info}")
+                            success = self.message_sender.send_opt_out_confirmation(contact_info, nurturing_campaign.name, twilio_number)
+                            if not success:
+                                logger.error(f"Failed to send opt-out confirmation to {contact_info} from campaign {nurturing_campaign.name}")
                         
                         return True
                         
@@ -134,11 +133,11 @@ class KeywordProcessingService:
                         return False
             else:
                 # Opt out from all campaigns for this lead
-                return self._handle_opt_out_all(lead, contact_info, channel)
+                return self._handle_opt_out_all(lead, contact_info, channel, twilio_number)
         
         return False
     
-    def _handle_opt_out_all(self, lead: Optional[Lead], contact_info: str, channel: str) -> bool:
+    def _handle_opt_out_all(self, lead: Optional[Lead], contact_info: str, channel: str, twilio_number: Optional[str] = None) -> bool:
         """
         Handle opt-out from all campaigns.
         
@@ -146,6 +145,7 @@ class KeywordProcessingService:
             lead: The lead (if found)
             contact_info: The contact information
             channel: The communication channel
+            twilio_number: The Twilio number to send from (for SMS)
             
         Returns:
             bool: True if opt-out was successful
@@ -164,23 +164,20 @@ class KeywordProcessingService:
             for participant in active_participants:
                 try:
                     participant.opt_out()
-                    logger.info(f"Opted out {contact_info} from campaign {participant.nurturing_campaign.name}")
                     success_count += 1
                 except Exception as e:
                     logger.error(f"Error opting out from campaign {participant.nurturing_campaign.name}: {e}")
             
             # Send opt-out confirmation message for all campaigns
             if self.message_sender:
-                success = self.message_sender.send_opt_out_confirmation(contact_info, channel=channel)
-                if success:
-                    logger.info(f"Sent opt-out confirmation to {contact_info}")
-                else:
-                    logger.error(f"Failed to send opt-out confirmation to {contact_info}")
+                success = self.message_sender.send_opt_out_confirmation(contact_info, twilio_number)
+                if not success:
+                    logger.error(f"Failed to send opt-out confirmation to {contact_info} from campaign {participant.nurturing_campaign.name}")
             
             return success_count > 0
     
     def _handle_opt_in(self, lead: Optional[Lead], nurturing_campaign: Optional[LeadNurturingCampaign], 
-                      contact_info: str, channel: str) -> bool:
+                      contact_info: str, channel: str, twilio_number: Optional[str] = None) -> bool:
         """
         Handle opt-in request.
         
@@ -189,6 +186,7 @@ class KeywordProcessingService:
             nurturing_campaign: The nurturing campaign (if found)
             contact_info: The contact information
             channel: The communication channel
+            twilio_number: The Twilio number to send from (for SMS)
             
         Returns:
             bool: True if opt-in was successful
@@ -209,22 +207,19 @@ class KeywordProcessingService:
                 participant.status = 'active'
                 participant.exited_campaign_at = None
                 participant.save()
-                logger.info(f"Successfully opted in {contact_info} to campaign {nurturing_campaign.name}")
                 
                 # Send opt-in confirmation message
                 if self.message_sender:
-                    success = self.message_sender.send_opt_in_confirmation(contact_info, nurturing_campaign.name, channel)
-                    if success:
-                        logger.info(f"Sent opt-in confirmation to {contact_info}")
-                    else:
-                        logger.error(f"Failed to send opt-in confirmation to {contact_info}")
+                    success = self.message_sender.send_opt_in_confirmation(contact_info, nurturing_campaign.name, twilio_number)
+                    if not success:
+                        logger.error(f"Failed to send opt-in confirmation to {contact_info} from campaign {nurturing_campaign.name}")
                 
                 return True
         
         return False
     
     def _handle_help_request(self, lead: Optional[Lead], nurturing_campaign: Optional[LeadNurturingCampaign], 
-                           contact_info: str, channel: str) -> bool:
+                           contact_info: str, channel: str, twilio_number: Optional[str] = None) -> bool:
         """
         Handle help request.
         
@@ -233,23 +228,23 @@ class KeywordProcessingService:
             nurturing_campaign: The nurturing campaign (if found)
             contact_info: The contact information
             channel: The communication channel
+            twilio_number: The Twilio number to send from (for SMS)
             
         Returns:
             bool: True if help message was sent successfully
         """
         if self.message_sender:
-            success = self.message_sender.send_help_message(contact_info, channel)
+            success = self.message_sender.send_help_message(contact_info, twilio_number)
             if success:
-                logger.info(f"Sent help message to {contact_info}")
                 return True
             else:
-                logger.error(f"Failed to send help message to {contact_info}")
+                logger.error(f"Failed to send help message to {contact_info} from campaign {nurturing_campaign.name}")
                 return False
         
         return False
     
     def _handle_info_request(self, lead: Optional[Lead], nurturing_campaign: Optional[LeadNurturingCampaign], 
-                           contact_info: str, channel: str) -> bool:
+                           contact_info: str, channel: str, twilio_number: Optional[str] = None) -> bool:
         """
         Handle info request.
         
@@ -258,6 +253,7 @@ class KeywordProcessingService:
             nurturing_campaign: The nurturing campaign (if found)
             contact_info: The contact information
             channel: The communication channel
+            twilio_number: The Twilio number to send from (for SMS)
             
         Returns:
             bool: True if info message was sent successfully
@@ -265,12 +261,11 @@ class KeywordProcessingService:
         campaign_name = nurturing_campaign.name if nurturing_campaign else None
         
         if self.message_sender:
-            success = self.message_sender.send_info_message(contact_info, campaign_name, channel)
+            success = self.message_sender.send_info_message(contact_info, campaign_name, twilio_number)
             if success:
-                logger.info(f"Sent info message to {contact_info}")
                 return True
             else:
-                logger.error(f"Failed to send info message to {contact_info}")
+                logger.error(f"Failed to send info message to {contact_info} from campaign {nurturing_campaign.name}")
                 return False
         
         return False
@@ -291,17 +286,14 @@ class KeywordProcessingService:
         Returns:
             bool: True if confirmation was handled successfully
         """
-        logger.info(f"Processing confirmation {action} from {contact_info}")
         
         # Here you would implement confirmation logic
         # This could trigger next steps in a journey or update lead status
         if action == 'confirm':
             # Handle positive confirmation
-            logger.info(f"Positive confirmation received from {contact_info}")
             return True
         elif action == 'decline':
             # Handle negative confirmation
-            logger.info(f"Negative confirmation received from {contact_info}")
             return True
         
         return False

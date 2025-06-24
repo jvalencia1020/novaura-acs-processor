@@ -6,7 +6,14 @@
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-entrypoint.sh" beforeDir="false" afterPath="$PROJECT_DIR$/docker-entrypoint.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/management/commands/setup_channel_processors.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/management/commands/setup_channel_processors.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/services/base_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/base_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/services/email_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/email_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/services/sms_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/sms_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/utils/message_sender.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/utils/message_sender.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/conversation_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/keyword_processing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/keyword_processing_service.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -304,6 +311,21 @@
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
           <line>253</line>
           <option name="timeStamp" value="45" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
+          <line>76</line>
+          <option name="timeStamp" value="46" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
+          <line>119</line>
+          <option name="timeStamp" value="47" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
+          <line>110</line>
+          <option name="timeStamp" value="48" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

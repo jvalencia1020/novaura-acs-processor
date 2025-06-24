@@ -878,7 +878,7 @@ class LeadNurturingParticipant(models.Model):
     def _update_reminder_progress(self, now, scheduled_time):
         """Update progress for reminder campaigns"""
         days_before = self._get_days_before(now)
-        if days_before > 0:
+        if days_before is not None and days_before > 0:
             ReminderCampaignProgress.objects.create(
                 participant=self,
                 days_before=days_before,
@@ -910,6 +910,9 @@ class LeadNurturingParticipant(models.Model):
         )
         
         for reminder in campaign.reminder_schedule.reminder_times.all():
+            # Skip reminders with None days_before values
+            if reminder.days_before is None:
+                continue
             if reminder.days_before not in sent_days:
                 return reminder.days_before
 

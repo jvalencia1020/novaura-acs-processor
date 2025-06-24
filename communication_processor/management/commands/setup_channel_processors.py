@@ -1,8 +1,9 @@
 import logging
 from django.core.management.base import BaseCommand
 from django.conf import settings
+from django.db.models import Count
 
-from communication_processor.models import ChannelProcessor
+from communication_processor.models import ChannelProcessor, SQSMessage
 from communication_processor.services.processor_factory import ProcessorFactory
 
 
@@ -61,6 +62,17 @@ class Command(BaseCommand):
             type=str,
             help='Disable a channel processor'
         )
+        parser.add_argument(
+            '--cleanup-messages',
+            action='store_true',
+            help='Clean up old failed messages'
+        )
+        parser.add_argument(
+            '--cleanup-days',
+            type=int,
+            default=7,
+            help='Number of days for cleanup (default: 7)'
+        )
     
     def handle(self, *args, **options):
         if options['list']:
@@ -77,6 +89,10 @@ class Command(BaseCommand):
         
         if options['disable']:
             self._disable_channel(options['disable'])
+            return
+        
+        if options['cleanup_messages']:
+            self._cleanup_messages(options['cleanup_days'])
             return
         
         if options['channel']:
@@ -225,4 +241,59 @@ class Command(BaseCommand):
         
         self.stdout.write(
             self.style.SUCCESS('Default channel setup completed')
-        ) 
+        )
+    
+    def _cleanup_messages(self, days_old: int):
+        """Clean up old failed messages."""
+        from datetime import timedelta
+        from django.utils import timezone
+        
+        cutoff_date = timezone.now() - timedelta(days=days_old)
+        
+        # Clean up old failed messages
+        old_failed_messages = SQSMessage.objects.filter(
+            status='failed',
+            received_at__lt=cutoff_date
+        )
+        
+        count = old_failed_messages.count()
+        if count > 0:
+            old_failed_messages.delete()
+            self.stdout.write(
+                self.style.SUCCESS(f'Cleaned up {count} old failed messages older than {days_old} days')
+            )
+        else:
+            self.stdout.write(
+                self.style.WARNING(f'No old failed messages found older than {days_old} days')
+            )
+        
+        # Also clean up duplicate messages (keep the most recent one)
+        from django.db.models import Max
+        
+        duplicates = SQSMessage.objects.values('message_id').annotate(
+            max_id=Max('id')
+        ).filter(
+            message_id__in=SQSMessage.objects.values('message_id').annotate(
+                count=Count('id')
+            ).filter(count__gt=1).values_list('message_id', flat=True)
+        )
+        
+        duplicate_count = 0
+        for duplicate in duplicates:
+            # Delete all but the most recent record for each message_id
+            old_records = SQSMessage.objects.filter(
+                message_id=duplicate['message_id']
+            ).exclude(
+                id=duplicate['max_id']
+            )
+            duplicate_count += old_records.count()
+            old_records.delete()
+        
+        if duplicate_count > 0:
+            self.stdout.write(
+                self.style.SUCCESS(f'Cleaned up {duplicate_count} duplicate message records')
+            )
+        else:
+            self.stdout.write(
+                self.style.WARNING('No duplicate message records found')
+            ) 
