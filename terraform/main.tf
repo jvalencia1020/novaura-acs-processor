@@ -122,4 +122,9 @@ variable "rds_security_group_id" {
 variable "twilio_credentials_arn" {
   description = "ARN of the Secrets Manager secret containing Twilio credentials"
   type        = string
+}
+
+variable "bland_ai_api_key_arn" {
+  description = "ARN of the Secrets Manager secret containing Bland AI API key"
+  type        = string
 } 

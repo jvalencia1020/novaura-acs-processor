@@ -1,4 +1,5 @@
 from .message_delivery import MessageDeliveryService
+from .voice_delivery import VoiceDeliveryService
 from .message_validation_service import MessageValidationService
 from .time_calculation_service import TimeCalculationService
 from .message_group_service import MessageGroupService
@@ -10,6 +11,7 @@ from .ai_agent_service import AIAgentService
 
 __all__ = [
     'MessageDeliveryService',
+    'VoiceDeliveryService',
     'MessageValidationService', 
     'TimeCalculationService',
     'MessageGroupService',

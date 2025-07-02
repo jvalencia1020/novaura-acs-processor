@@ -719,14 +719,16 @@ class BulkCampaignProcessor:
             # Get message content
             processed_content = message.get_message_content()
 
-            # Get service phone number for SMS/Voice
+            # Get service phone number for SMS/Voice using modular channel configuration
             service_phone = None
             if campaign.channel in ['sms', 'voice']:
                 if message.message_type in ['opt_out_notice', 'opt_out_confirmation']:
                     if campaign.campaign_type == 'drip':
                         first_step = campaign.drip_schedule.message_steps.order_by('order').first()
-                        if first_step and first_step.sms_config:
-                            service_phone = first_step.sms_config.get_from_number()
+                        if first_step:
+                            channel_config = first_step.get_channel_config()
+                            if channel_config and hasattr(channel_config, 'get_from_number'):
+                                service_phone = channel_config.get_from_number()
                     elif campaign.campaign_type == 'reminder':
                         # Get the first reminder_message in the message group
                         first_reminder_message = None
@@ -737,20 +739,41 @@ class BulkCampaignProcessor:
                                 .order_by('scheduled_for')
                                 .first()
                             )
-                        if first_reminder_message and first_reminder_message.reminder_message and first_reminder_message.reminder_message.sms_config:
-                            service_phone = first_reminder_message.reminder_message.sms_config.get_from_number()
-                    elif campaign.sms_config:
-                        service_phone = campaign.sms_config.get_from_number()
+                        if first_reminder_message and first_reminder_message.reminder_message:
+                            channel_config = first_reminder_message.reminder_message.get_channel_config()
+                            if channel_config and hasattr(channel_config, 'get_from_number'):
+                                service_phone = channel_config.get_from_number()
+                    else:
+                        # For blast campaigns, use campaign-level config
+                        channel_config = self._get_campaign_channel_config(campaign)
+                        if channel_config and hasattr(channel_config, 'get_from_number'):
+                            service_phone = channel_config.get_from_number()
                 elif campaign.campaign_type == 'drip' and message.drip_message_step:
-                    service_phone = message.drip_message_step.sms_config.get_from_number()
+                    channel_config = message.drip_message_step.get_channel_config()
+                    if channel_config and hasattr(channel_config, 'get_from_number'):
+                        service_phone = channel_config.get_from_number()
                 elif campaign.campaign_type == 'reminder' and message.reminder_message:
-                    service_phone = message.reminder_message.sms_config.get_from_number()
+                    channel_config = message.reminder_message.get_channel_config()
+                    if channel_config and hasattr(channel_config, 'get_from_number'):
+                        service_phone = channel_config.get_from_number()
                 else:
-                    service_phone = campaign.sms_config.get_from_number()
+                    # For blast campaigns, use campaign-level config
+                    channel_config = self._get_campaign_channel_config(campaign)
+                    if channel_config and hasattr(channel_config, 'get_from_number'):
+                        service_phone = channel_config.get_from_number()
 
             # For opt-out messages, we want to send immediately
             if message.message_type in ['opt_out_notice', 'opt_out_confirmation']:
                 message.scheduled_for = timezone.now()
+
+            # Get channel configuration for the message
+            channel_config = None
+            if campaign.campaign_type == 'drip' and message.drip_message_step:
+                channel_config = message.drip_message_step.get_channel_config()
+            elif campaign.campaign_type == 'reminder' and message.reminder_message:
+                channel_config = message.reminder_message.get_channel_config()
+            else:
+                channel_config = self._get_campaign_channel_config(campaign)
 
             # Send message using the delivery service
             success, thread_message = self.message_delivery.send_message(
@@ -760,7 +783,8 @@ class BulkCampaignProcessor:
                 user=campaign.created_by,
                 subject=campaign.subject if hasattr(campaign, 'subject') else None,
                 service_phone=service_phone,
-                message_type=message.message_type  # Pass message type to delivery service
+                message_type=message.message_type,  # Pass message type to delivery service
+                channel_config=channel_config  # Pass channel configuration to delivery service
             )
 
             if success:
@@ -915,6 +939,26 @@ class BulkCampaignProcessor:
             user=None  # or link to a special "system" user if desired
         )
         return participant_obj, True
+
+    def _get_campaign_channel_config(self, campaign):
+        """
+        Get the appropriate channel configuration for a campaign based on its channel type.
+        
+        Args:
+            campaign: The campaign object
+            
+        Returns:
+            The channel configuration object (EmailConfig, SMSConfig, VoiceConfig, or ChatConfig)
+        """
+        if campaign.channel == 'email':
+            return campaign.email_config
+        elif campaign.channel == 'sms':
+            return campaign.sms_config
+        elif campaign.channel == 'voice':
+            return campaign.voice_config
+        elif campaign.channel == 'chat':
+            return campaign.chat_config
+        return None
 
     def _format_phone_number(self, phone_number):
         """

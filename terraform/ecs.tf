@@ -175,6 +175,10 @@ resource "aws_ecs_task_definition" "journey_worker_task" {
         {
           name = "TWILIO_AUTH_TOKEN",
           valueFrom = "${var.twilio_credentials_arn}:TWILIO_AUTH_TOKEN::"
+        },
+        {
+          name = "BLAND_AI_API_KEY",
+          valueFrom = "${var.bland_ai_api_key_arn}:BLAND_AI_API_KEY::"
         }
       ]
       
@@ -238,6 +242,10 @@ resource "aws_ecs_task_definition" "bulk_campaign_worker_task" {
         {
           name = "TWILIO_AUTH_TOKEN",
           valueFrom = "${var.twilio_credentials_arn}:TWILIO_AUTH_TOKEN::"
+        },
+        {
+          name = "BLAND_AI_API_KEY",
+          valueFrom = "${var.bland_ai_api_key_arn}:BLAND_AI_API_KEY::"
         }
       ]
       
@@ -303,6 +311,10 @@ resource "aws_ecs_task_definition" "communication_processor_worker_task" {
         {
           name = "TWILIO_AUTH_TOKEN",
           valueFrom = "${var.twilio_credentials_arn}:TWILIO_AUTH_TOKEN::"
+        },
+        {
+          name = "BLAND_AI_API_KEY",
+          valueFrom = "${var.bland_ai_api_key_arn}:BLAND_AI_API_KEY::"
         }
       ]
       

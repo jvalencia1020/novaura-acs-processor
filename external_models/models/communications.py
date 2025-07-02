@@ -338,28 +338,50 @@ class ContactEndpointChannel(models.Model):
         return f"{self.endpoint.value} - {self.channel}"
 
 
-class ContactEndpoint(models.Model):
-    PLATFORM_CHOICES = (
-        # Phone platforms
-        ('twilio', 'Twilio'),
-        ('vonage', 'Vonage'),
-        ('bandwidth', 'Bandwidth'),
-        ('plivo', 'Plivo'),
-        # Email platforms
-        ('gmail', 'Gmail'),
-        ('outlook', 'Outlook'),
-        ('sendgrid', 'SendGrid'),
-        ('mailchimp', 'Mailchimp'),
-        # Social platforms
-        ('facebook', 'Facebook'),
-        ('instagram', 'Instagram'),
-        ('twitter', 'Twitter'),
-        ('linkedin', 'LinkedIn'),
-        ('whatsapp', 'WhatsApp'),
-        # Other
+class ContactEndpointPlatform(models.Model):
+    PLATFORM_TYPE_CHOICES = (
+        ('phone', 'Phone'),
+        ('email', 'Email'),
+        ('social', 'Social Media'),
         ('other', 'Other'),
     )
 
+    name = models.CharField(
+        max_length=50,
+        unique=True,
+        help_text="Platform name (e.g. 'Twilio', 'Gmail', 'Facebook')"
+    )
+    display_name = models.CharField(
+        max_length=100,
+        help_text="User-friendly display name"
+    )
+    platform_type = models.CharField(
+        max_length=20,
+        choices=PLATFORM_TYPE_CHOICES,
+        help_text="Category of platform"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this platform is available for use"
+    )
+    description = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Optional description of the platform"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'contact_endpoint_platform'
+        ordering = ['platform_type', 'display_name']
+
+    def __str__(self):
+        return self.display_name
+
+
+class ContactEndpoint(models.Model):
     PRIORITY_CHOICES = (
         ('primary', 'Primary'),
         ('secondary', 'Secondary'),
@@ -371,11 +393,12 @@ class ContactEndpoint(models.Model):
         max_length=255,
         help_text="Phone number, email address, or social handle"
     )
-    platform = models.CharField(
-        max_length=50,
-        choices=PLATFORM_CHOICES,
+    platform = models.ForeignKey(
+        ContactEndpointPlatform,
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
+        related_name='endpoints',
         help_text="Platform or service provider for this contact endpoint"
     )
 
@@ -432,7 +455,7 @@ class ContactEndpoint(models.Model):
         if self.label:
             label += f" ({self.label})"
         elif self.platform:
-            label += f" ({self.platform})"
+            label += f" ({self.platform.display_name})"
         return label
 
     def get_channel_list(self):

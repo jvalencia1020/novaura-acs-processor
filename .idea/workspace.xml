@@ -5,15 +5,19 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.github/workflows/deploy.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/deploy.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/management/commands/setup_channel_processors.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/management/commands/setup_channel_processors.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/services/base_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/base_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/services/email_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/email_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/services/sms_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/sms_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/utils/message_sender.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/utils/message_sender.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared_services/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/conversation_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared_services/keyword_processing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/keyword_processing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/base.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/services/processor_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/processor_factory.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/channel_configs.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/channel_configs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/communications.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/communications.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/reminder_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/reminder_campaigns.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/message_delivery/message_delivery_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/message_delivery/message_delivery_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/message_validation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/message_validation_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/ecs.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/ecs.tf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/main.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/main.tf" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -47,7 +51,7 @@
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
-  <component name="RunManager" selected="Python.worker">
+  <component name="RunManager" selected="Python.process_due_messages">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
@@ -244,16 +248,6 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>744</line>
-          <option name="timeStamp" value="29" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>723</line>
-          <option name="timeStamp" value="33" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
           <line>485</line>
           <option name="timeStamp" value="34" />
         </line-breakpoint>
@@ -279,7 +273,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>765</line>
+          <line>789</line>
           <option name="timeStamp" value="39" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -314,24 +308,40 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
-          <line>76</line>
+          <line>75</line>
           <option name="timeStamp" value="46" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
-          <line>119</line>
+          <line>118</line>
           <option name="timeStamp" value="47" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
-          <line>110</line>
+          <line>109</line>
           <option name="timeStamp" value="48" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
+          <line>714</line>
+          <option name="timeStamp" value="49" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/shared_services/voice_delivery/voice_delivery_service.py</url>
+          <line>68</line>
+          <option name="timeStamp" value="54" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/shared_services/voice_platforms/bland_ai_platform.py</url>
+          <line>34</line>
+          <option name="timeStamp" value="56" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
     <watches-manager>
       <configuration name="PythonConfigurationType">
         <watch expression="e" />
+        <watch expression="campaign.created_at" />
       </configuration>
     </watches-manager>
   </component>

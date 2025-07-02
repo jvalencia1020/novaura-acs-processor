@@ -11,6 +11,7 @@ from external_models.models.communications import (
     ConversationThread,
     ThreadMessage
 )
+from ..voice_delivery.voice_delivery_service import VoiceDeliveryService
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +23,9 @@ class MessageDeliveryService:
 
     def __init__(self):
         self.twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        self.voice_delivery = VoiceDeliveryService()
 
-    def send_message(self, channel, content, lead, user, subject=None, service_phone=None, message_type='regular'):
+    def send_message(self, channel, content, lead, user, subject=None, service_phone=None, message_type='regular', channel_config=None):
         """
         Send a message through the specified channel.
         
@@ -35,6 +37,7 @@ class MessageDeliveryService:
             subject (str, optional): Subject for email messages
             service_phone (str, optional): Service phone number for SMS/Voice
             message_type (str, optional): Type of message ('regular', 'opt_out_notice', 'opt_out_confirmation')
+            channel_config: The channel configuration object (EmailConfig, SMSConfig, VoiceConfig, ChatConfig)
             
         Returns:
             tuple: (success, thread_message)
@@ -48,7 +51,7 @@ class MessageDeliveryService:
             elif channel == 'email':
                 return self._send_email(content, lead, user, subject, message_type)
             elif channel == 'voice':
-                return self._send_voice(content, lead, user, message_type)
+                return self._send_voice(content, lead, user, message_type, channel_config)
             elif channel == 'chat':
                 return self._send_chat(content, lead, user, message_type)
             else:
@@ -134,15 +137,14 @@ class MessageDeliveryService:
                 last_message_timestamp=timezone.now()
             )
 
-            # Create thread message with message type
+            # Create thread message
             thread_message = ThreadMessage.objects.create(
                 thread=thread,
                 sender_type='user',
                 content=content,
                 channel='email',
                 lead=lead,
-                user=user,
-                message_type=message_type
+                user=user
             )
 
             # TODO: Implement actual email sending using your email service
@@ -161,46 +163,15 @@ class MessageDeliveryService:
             logger.error(f"Error sending email message: {str(e)}")
             return False, None
 
-    def _send_voice(self, content, lead, user, message_type='regular'):
-        """Send a voice message"""
-        try:
-            # Create thread for tracking
-            thread = ConversationThread.objects.create(
-                lead=lead,
-                channel='voice',
-                status='open',
-                last_message_timestamp=timezone.now()
-            )
-
-            # Create thread message with message type
-            thread_message = ThreadMessage.objects.create(
-                thread=thread,
-                sender_type='user',
-                content=content,
-                channel='voice',
-                lead=lead,
-                user=user,
-                message_type=message_type
-            )
-
-            # TODO: Implement actual voice call using Bland AI
-            # This would involve:
-            # 1. Creating a Bland AI call
-            # 2. Linking it to the thread
-            # 3. Initiating the call
-            # For now, we'll just mark it as sent
-            thread_message.read_status = True
-            thread_message.save()
-
-            # Log successful opt-out message delivery
-            if message_type in ['opt_out_notice', 'opt_out_confirmation']:
-                logger.info(f"Successfully sent {message_type} message to {lead.email} via voice")
-
-            return True, thread_message
-
-        except Exception as e:
-            logger.error(f"Error sending voice message: {str(e)}")
-            return False, None
+    def _send_voice(self, content, lead, user, message_type='regular', voice_config=None):
+        """Send a voice message using the voice delivery service"""
+        return self.voice_delivery.send_voice_message(
+            content=content,
+            lead=lead,
+            user=user,
+            voice_config=voice_config,
+            message_type=message_type
+        )
 
     def _send_chat(self, content, lead, user, message_type='regular'):
         """Send a chat message"""
@@ -213,15 +184,14 @@ class MessageDeliveryService:
                 last_message_timestamp=timezone.now()
             )
 
-            # Create thread message with message type
+            # Create thread message
             thread_message = ThreadMessage.objects.create(
                 thread=thread,
                 sender_type='user',
                 content=content,
                 channel='chat',
                 lead=lead,
-                user=user,
-                message_type=message_type
+                user=user
             )
 
             # TODO: Implement actual chat message sending using your chat service

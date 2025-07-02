@@ -174,6 +174,18 @@ class ReminderMessage(models.Model):
         if sum(1 for config in configs if config is not None) != 1:
             raise ValidationError("Exactly one channel configuration must be set")
 
+    def get_channel_config(self):
+        """Get the active channel config for this reminder message"""
+        if self.email_config:
+            return self.email_config
+        elif self.sms_config:
+            return self.sms_config
+        elif self.voice_config:
+            return self.voice_config
+        elif self.chat_config:
+            return self.chat_config
+        return None
+
     def __str__(self):
         channel = next(
             (name for name, config in [

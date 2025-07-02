@@ -6,6 +6,7 @@ from communication_processor.models import ChannelProcessor
 from communication_processor.services.base_processor import BaseChannelProcessor
 from communication_processor.services.sms_processor import SMSProcessor
 from communication_processor.services.email_processor import EmailProcessor
+from communication_processor.services.voice_processor import VoiceProcessor
 
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,8 @@ class ProcessorFactory:
     PROCESSORS = {
         'sms': SMSProcessor,
         'email': EmailProcessor,
+        'voice': VoiceProcessor,
         # Add more processors as needed:
-        # 'voice': VoiceProcessor,
         # 'chat': ChatProcessor,
         # 'whatsapp': WhatsAppProcessor,
     }
