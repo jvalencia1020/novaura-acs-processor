@@ -34,7 +34,8 @@ resource "aws_iam_role_policy" "ecs_execution_role_secrets_policy" {
         ]
         Resource = [
           var.db_password_arn,
-          var.django_secret_key_arn
+          var.django_secret_key_arn,
+          var.bland_ai_api_key_arn
         ]
       }
     ]
@@ -115,7 +116,8 @@ resource "aws_iam_role_policy" "ecs_task_role_policy" {
         ]
         Resource = [
           var.db_password_arn,
-          var.django_secret_key_arn
+          var.django_secret_key_arn,
+          var.bland_ai_api_key_arn
         ]
       }
     ]
@@ -137,7 +139,8 @@ resource "aws_iam_role_policy" "ecs_execution_policy" {
         Resource = [
           var.db_password_arn,
           var.django_secret_key_arn,
-          var.twilio_credentials_arn
+          var.twilio_credentials_arn,
+          var.bland_ai_api_key_arn
         ]
       },
       {

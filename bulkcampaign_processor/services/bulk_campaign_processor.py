@@ -7,45 +7,35 @@ import pytz
 from datetime import timedelta
 
 from external_models.models.nurturing_campaigns import (
-    LeadNurturingCampaign,
     LeadNurturingParticipant,
     BulkCampaignMessage,
 )
 
 from external_models.models.drip_campaigns import (
-    DripCampaignMessageStep,
-    DripCampaignProgress,
-    DripCampaignSchedule
+    DripCampaignProgress
 )
 
 from external_models.models.reminder_campaigns import (
     ReminderCampaignProgress,
-    ReminderCampaignSchedule,
-    ReminderTime
 )
 
 from external_models.models.blast_campaigns import (
     BlastCampaignProgress,
-    BlastCampaignSchedule
 )
 
 from external_models.models.communications import (
-    Conversation,
-    Participant,
-    ConversationMessage,
-    ConversationThread,
-    ThreadMessage
+    Participant
 )
 
 from django.conf import settings
 import time
-from twilio.http import HttpClient
-from twilio.base.exceptions import TwilioRestException
 
 from shared_services.message_delivery import MessageDeliveryService
 from shared_services.message_validation_service import MessageValidationService
 from shared_services.time_calculation_service import TimeCalculationService
 from shared_services.message_group_service import MessageGroupService
+
+from bulkcampaign_processor.utils.timezone_utils import convert_from_utc
 
 logger = logging.getLogger(__name__)
 
@@ -466,8 +456,9 @@ class BulkCampaignProcessor:
                 
                 # Calculate next send time
                 now = timezone.now()
+                now_local = convert_from_utc(now, schedule.timezone)
                 delay = current_step.get_delay_timedelta()
-                next_time = now + delay
+                next_time = now_local + delay
                 
                 # Apply schedule restrictions
                 next_time = self.time_calculator.get_next_valid_time(next_time, schedule)
@@ -478,7 +469,7 @@ class BulkCampaignProcessor:
                 
                 # Validate message step has content through channel config
                 channel_config = current_step.get_channel_config()
-                if not channel_config or not channel_config.content:
+                if not channel_config:
                     logger.error(f"Message step {current_step.id} has no content in channel config")
                     return False
 

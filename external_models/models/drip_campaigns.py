@@ -124,6 +124,7 @@ class DripCampaignSchedule(CampaignScheduleBase):
     start_time = models.TimeField()
     end_time = models.TimeField()
     exclude_weekends = models.BooleanField(default=False)
+    timezone = models.CharField(max_length=50, default='UTC', help_text="Timezone for scheduling messages")
 
     class Meta:
         managed = False
