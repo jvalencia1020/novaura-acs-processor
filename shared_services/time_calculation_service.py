@@ -1,6 +1,7 @@
 import logging
 from django.utils import timezone
 from datetime import timedelta, time
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +158,18 @@ class TimeCalculationService:
         try:
             if not schedule.business_hours_only:
                 return True
+
+            # Localize current_time to the schedule's timezone
+            if hasattr(schedule, 'timezone') and schedule.timezone:
+                try:
+                    tz = pytz.timezone(schedule.timezone)
+                    current_time = current_time.astimezone(tz)
+                except pytz.exceptions.UnknownTimeZoneError:
+                    logger.warning(f"Unknown timezone '{schedule.timezone}', using UTC")
+                    current_time = current_time.astimezone(pytz.UTC)
+            else:
+                # If no timezone specified, assume UTC
+                current_time = current_time.astimezone(pytz.UTC)
 
             current_time = current_time.time()
             return schedule.start_time <= current_time < schedule.end_time
