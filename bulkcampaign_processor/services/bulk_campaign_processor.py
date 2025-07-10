@@ -90,10 +90,12 @@ class BulkCampaignProcessor:
         Returns:
             int: Number of messages processed
         """
-        # Find all pending messages that are due
+        # Find all pending messages that are due from active campaigns only
         due_messages = BulkCampaignMessage.objects.filter(
             status__in=['pending', 'scheduled', 'failed'],  # Only include failed status for retry
-            scheduled_for__lte=timezone.now()
+            scheduled_for__lte=timezone.now(),
+            campaign__active=True,  # Only include messages from active campaigns
+            campaign__status__in=['active', 'scheduled']  # Only include messages from active or scheduled campaigns
         ).select_related(
             'campaign',
             'participant',
@@ -108,6 +110,11 @@ class BulkCampaignProcessor:
             try:
                 # Skip if we've already processed this message group
                 if message.message_group_id in processed_groups:
+                    continue
+
+                # Check if the campaign is still active before processing
+                if not message.campaign.is_active_or_scheduled():
+                    logger.warning(f"Skipping message {message.id} from inactive campaign {message.campaign.id} - Status: {message.campaign.status}")
                     continue
 
                 # Get all messages in the group
@@ -238,13 +245,7 @@ class BulkCampaignProcessor:
                 if not progress.current_step:
                     continue
                 
-                # Check if it's time for next message
-                should_send = self._should_send_drip_message(participant, schedule)
-                
-                if not should_send:
-                    continue
-
-                # Schedule next message
+                # Schedule next message if needed
                 if self._schedule_drip_message(participant, schedule):
                     scheduled_count += 1
                 
@@ -308,11 +309,6 @@ class BulkCampaignProcessor:
             return 0
 
         schedule = campaign.blast_schedule
-        now = timezone.now()
-
-        # Check if it's time to send the blast
-        if schedule.send_time > now:
-            return 0
 
         # Check if campaign is active
         if not campaign.is_active_or_scheduled():
@@ -345,31 +341,7 @@ class BulkCampaignProcessor:
 
         return scheduled_count
 
-    def _should_send_drip_message(self, participant, schedule):
-        """Check if it's time to send the next message for a participant"""
-        progress = participant.drip_campaign_progress.first()
-        if not progress:
-            logger.error(f"No progress found for participant {participant.id}")
-            return False
 
-        if not progress.current_step:
-            return False
-
-        now = timezone.now()
-
-        # Check if we're past the scheduled time
-        if now < progress.next_scheduled_interval:
-            return False
-
-        # Check business hours if enabled
-        if not self.time_calculator.is_within_business_hours(now, schedule):
-            return False
-
-        # Check weekend restrictions if enabled
-        if schedule.exclude_weekends and now.weekday() >= 5:
-            return False
-
-        return True
 
     def _get_next_reminder_time(self, participant, schedule):
         """Get the next reminder time for a participant"""
@@ -452,6 +424,18 @@ class BulkCampaignProcessor:
                 current_step = progress.current_step
                 if not current_step:
                     logger.debug(f"Participant {participant.id} has no current step")
+                    return False
+                
+                # Check if we already have a message scheduled for this step
+                existing_message = BulkCampaignMessage.objects.filter(
+                    participant=participant,
+                    campaign=participant.nurturing_campaign,
+                    drip_message_step=current_step,
+                    status__in=['pending', 'scheduled']
+                ).first()
+                
+                if existing_message:
+                    logger.debug(f"Message already scheduled for participant {participant.id} at step {current_step.order}")
                     return False
                 
                 # Calculate next send time
@@ -645,7 +629,24 @@ class BulkCampaignProcessor:
         """Schedule a blast campaign message"""
         try:
             with transaction.atomic():
+                # Check if we already have a message scheduled for this participant
+                existing_message = BulkCampaignMessage.objects.filter(
+                    participant=participant,
+                    campaign=participant.nurturing_campaign,
+                    message_type='regular',
+                    status__in=['pending', 'scheduled']
+                ).first()
+                
+                if existing_message:
+                    logger.debug(f"Blast message already scheduled for participant {participant.id}")
+                    return False
+
+                # Start with the original send time
                 send_time = schedule.send_time
+                
+                # Apply business hours adjustment if enabled
+                if schedule.business_hours_only:
+                    send_time = self.time_calculator.get_next_valid_time(send_time, schedule)
 
                 # Create or get message group
                 message_group = self.message_group.create_or_get_message_group(
@@ -706,6 +707,28 @@ class BulkCampaignProcessor:
             if not campaign.can_send_message(participant):
                 logger.debug(f"Cannot send message {message.id} - campaign or participant not active")
                 return False
+
+            # Check business hours and weekend restrictions before sending for all campaign types
+            # that have business_hours_only enabled
+            if campaign.crm_campaign and hasattr(campaign, 'drip_schedule') and campaign.drip_schedule and campaign.drip_schedule.business_hours_only:
+                if not self.time_calculator.is_within_campaign_operating_hours(timezone.now(), campaign.crm_campaign):
+                    logger.debug(f"Cannot send drip message {message.id} - outside campaign operating hours")
+                    return False
+            elif campaign.crm_campaign and hasattr(campaign, 'reminder_schedule') and campaign.reminder_schedule and campaign.reminder_schedule.business_hours_only:
+                if not self.time_calculator.is_within_campaign_operating_hours(timezone.now(), campaign.crm_campaign):
+                    logger.debug(f"Cannot send reminder message {message.id} - outside campaign operating hours")
+                    return False
+            elif campaign.crm_campaign and hasattr(campaign, 'blast_schedule') and campaign.blast_schedule and campaign.blast_schedule.business_hours_only:
+                if not self.time_calculator.is_within_campaign_operating_hours(timezone.now(), campaign.crm_campaign):
+                    logger.debug(f"Cannot send blast message {message.id} - outside campaign operating hours")
+                    return False
+
+            # Check if it's time to send blast messages
+            if campaign.campaign_type == 'blast' and campaign.blast_schedule:
+                now = timezone.now()
+                if now < campaign.blast_schedule.send_time:
+                    logger.debug(f"Cannot send blast message {message.id} - send time not reached yet")
+                    return False
 
             # Get message content
             processed_content = message.get_message_content()

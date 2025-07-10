@@ -3,6 +3,7 @@ from django.utils import timezone
 from django.conf import settings
 from django.contrib.auth.models import Group
 from .accounts import User
+from django.core.exceptions import ValidationError
 
 # External CRM models
 class Account(models.Model):
@@ -342,3 +343,152 @@ class ScheduledReachOut(models.Model):
 
     def __str__(self):
         return f"Scheduled follow-up for {self.lead} on {self.scheduled_date} ({self.get_status_display()})"
+
+
+class CampaignOperatingHoursTimeSlot(models.Model):
+    operating_hours = models.ForeignKey(
+        'CampaignOperatingHours',
+        on_delete=models.CASCADE,
+        related_name='time_slots'
+    )
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'campaign_operating_hours_time_slot'
+        ordering = ['start_time']
+
+    def __str__(self):
+        return f"{self.start_time} to {self.end_time}"
+
+
+class CampaignOperatingHours(models.Model):
+    DAY_CHOICES = [
+        ('monday', 'Monday'),
+        ('tuesday', 'Tuesday'),
+        ('wednesday', 'Wednesday'),
+        ('thursday', 'Thursday'),
+        ('friday', 'Friday'),
+        ('saturday', 'Saturday'),
+        ('sunday', 'Sunday'),
+    ]
+
+    campaign = models.ForeignKey(
+        Campaign,
+        on_delete=models.CASCADE,
+        related_name='operating_hours'
+    )
+    day_of_week = models.CharField(
+        max_length=10,
+        choices=DAY_CHOICES,
+        help_text='Day of the week for these operating hours'
+    )
+    is_closed = models.BooleanField(
+        default=False,
+        help_text='If True, the campaign is closed on this day'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'campaign_operating_hours'
+        unique_together = ('campaign', 'day_of_week')
+        ordering = ['day_of_week']
+
+    def __str__(self):
+        if self.is_closed:
+            return f"{self.campaign.name} - {self.get_day_of_week_display()} - Closed"
+        time_slots = self.time_slots.all()
+        if time_slots:
+            slots_str = ", ".join(f"{slot.start_time} to {slot.end_time}" for slot in time_slots)
+            return f"{self.campaign.name} - {self.get_day_of_week_display()} - {slots_str}"
+        return f"{self.campaign.name} - {self.get_day_of_week_display()}"
+
+    def clean(self):
+        if not self.campaign.is_24_7 and not self.is_closed:
+            if not self.time_slots.exists():
+                raise ValidationError("At least one time slot is required when the day is not closed")
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        if not is_new:
+            # Get the original instance to compare changes
+            original = CampaignOperatingHours.objects.get(pk=self.pk)
+            
+            # Check if there are any relevant changes
+            has_changes = (
+                original.is_closed != self.is_closed or
+                # Compare time slots if the day is not closed
+                (not self.is_closed and not original.is_closed and
+                 list(original.time_slots.values_list('start_time', 'end_time')) !=
+                 list(self.time_slots.values_list('start_time', 'end_time')))
+            )
+            
+            if has_changes:
+                history = CampaignOperatingHoursHistory.objects.create(
+                    operating_hours=self,
+                    is_closed=self.is_closed,
+                    changed_by=self.campaign.last_updated_by if hasattr(self.campaign, 'last_updated_by') else None
+                )
+                
+                # Time slots will be automatically created in the history record's save method
+                
+        super().save(*args, **kwargs)
+
+
+class CampaignOperatingHoursTimeSlotHistory(models.Model):
+    operating_hours_history = models.ForeignKey(
+        'CampaignOperatingHoursHistory',
+        on_delete=models.CASCADE,
+        related_name='time_slots'
+    )
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = False
+        db_table = 'campaign_operating_hours_time_slot_history'
+        ordering = ['start_time']
+
+    def __str__(self):
+        return f"Time slot history for {self.operating_hours_history} - {self.start_time} to {self.end_time}"
+
+
+class CampaignOperatingHoursHistory(models.Model):
+    operating_hours = models.ForeignKey(
+        CampaignOperatingHours,
+        on_delete=models.CASCADE,
+        related_name='history'
+    )
+    is_closed = models.BooleanField()
+    changed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='operating_hours_changes'
+    )
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = False
+        db_table = 'campaign_operating_hours_history'
+        ordering = ['-changed_at']
+
+    def __str__(self):
+        return f"History for {self.operating_hours} - Changed at {self.changed_at}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Create time slot history records
+        if not self.is_closed:
+            for time_slot in self.operating_hours.time_slots.all():
+                CampaignOperatingHoursTimeSlotHistory.objects.create(
+                    operating_hours_history=self,
+                    start_time=time_slot.start_time,
+                    end_time=time_slot.end_time
+                )

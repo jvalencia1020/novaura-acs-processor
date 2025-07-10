@@ -2,6 +2,7 @@ import logging
 from django.utils import timezone
 from datetime import timedelta, time
 import pytz
+from external_models.models.external_references import CampaignOperatingHours, CampaignOperatingHoursTimeSlot
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,17 @@ class TimeCalculationService:
             datetime: The next valid time
         """
         try:
-            # First adjust for business hours
+            # Check if we should use campaign operating hours
+            if hasattr(schedule, 'campaign') and schedule.campaign and schedule.business_hours_only:
+                # Get the CRM campaign which contains the operating hours
+                crm_campaign = getattr(schedule.campaign, 'crm_campaign', None)
+                if crm_campaign:
+                    # Use campaign operating hours if available
+                    next_time = self.calculate_next_campaign_operating_time(current_time, crm_campaign)
+                    if next_time:
+                        return next_time
+            
+            # Fall back to legacy business hours logic
             next_time = self.calculate_next_business_time(current_time, schedule)
             
             # Then adjust for weekends if needed
@@ -200,4 +211,131 @@ class TimeCalculationService:
 
         except Exception as e:
             logger.exception(f"Error getting next valid time: {e}")
-            return current_time 
+            return current_time
+
+    def is_within_campaign_operating_hours(self, current_time, campaign):
+        """
+        Check if a given time is within the campaign's operating hours.
+        
+        Args:
+            current_time: The time to check (UTC)
+            campaign: The campaign object
+            
+        Returns:
+            bool: True if the time is within operating hours
+        """
+        try:
+            # If campaign is 24/7, always return True
+            if campaign.is_24_7:
+                return True
+
+            # Get the day of week for the current time
+            day_mapping = {
+                0: 'monday',
+                1: 'tuesday', 
+                2: 'wednesday',
+                3: 'thursday',
+                4: 'friday',
+                5: 'saturday',
+                6: 'sunday'
+            }
+            day_of_week = day_mapping[current_time.weekday()]
+
+            # Get operating hours for this day
+            operating_hours = CampaignOperatingHours.objects.filter(
+                campaign=campaign,
+                day_of_week=day_of_week
+            ).first()
+
+            if not operating_hours:
+                # No operating hours set for this day, assume closed
+                return False
+
+            if operating_hours.is_closed:
+                return False
+
+            # Check if current time falls within any time slot
+            current_time_only = current_time.time()
+            for time_slot in operating_hours.time_slots.all():
+                if time_slot.start_time <= current_time_only < time_slot.end_time:
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.exception(f"Error checking campaign operating hours: {e}")
+            return False
+
+    def calculate_next_campaign_operating_time(self, current_time, campaign):
+        """
+        Calculate the next valid operating time based on campaign operating hours.
+        
+        Args:
+            current_time: The current time to calculate from (UTC)
+            campaign: The campaign object
+            
+        Returns:
+            datetime: The next valid operating time, or None if no operating hours found
+        """
+        try:
+            # If campaign is 24/7, return current time
+            if campaign.is_24_7:
+                return current_time
+
+            # Start with current time
+            next_time = current_time
+
+            # Try to find a valid time within the next 7 days
+            for _ in range(7):
+                day_mapping = {
+                    0: 'monday',
+                    1: 'tuesday', 
+                    2: 'wednesday',
+                    3: 'thursday',
+                    4: 'friday',
+                    5: 'saturday',
+                    6: 'sunday'
+                }
+                day_of_week = day_mapping[next_time.weekday()]
+
+                # Get operating hours for this day
+                operating_hours = CampaignOperatingHours.objects.filter(
+                    campaign=campaign,
+                    day_of_week=day_of_week
+                ).first()
+
+                if operating_hours and not operating_hours.is_closed:
+                    # Check if current time is within any time slot
+                    current_time_only = next_time.time()
+                    for time_slot in operating_hours.time_slots.all():
+                        if current_time_only < time_slot.start_time:
+                            # Current time is before this time slot starts
+                            # Return the start time of this slot
+                            return timezone.make_aware(
+                                timezone.datetime.combine(next_time.date(), time_slot.start_time)
+                            )
+                        elif time_slot.start_time <= current_time_only < time_slot.end_time:
+                            # Current time is within this time slot
+                            return next_time
+
+                    # Current time is after all time slots for this day
+                    # Move to next day and try again
+                    next_time = next_time + timedelta(days=1)
+                    next_time = timezone.make_aware(
+                        timezone.datetime.combine(next_time.date(), time(0, 0))
+                    )
+                else:
+                    # Day is closed or no operating hours set
+                    # Move to next day
+                    next_time = next_time + timedelta(days=1)
+                    next_time = timezone.make_aware(
+                        timezone.datetime.combine(next_time.date(), time(0, 0))
+                    )
+
+            # If we get here, we couldn't find a valid time within 7 days
+            logger.warning(f"Could not find valid operating time for campaign {campaign.id} within 7 days")
+            return None
+
+        except Exception as e:
+            logger.exception(f"Error calculating next campaign operating time: {e}")
+            return None 
