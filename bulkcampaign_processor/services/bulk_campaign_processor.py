@@ -427,15 +427,19 @@ class BulkCampaignProcessor:
                     return False
                 
                 # Check if we already have a message scheduled for this step
+                # Include 'failed' status to prevent scheduling new messages when there's already a failed one
                 existing_message = BulkCampaignMessage.objects.filter(
                     participant=participant,
                     campaign=participant.nurturing_campaign,
                     drip_message_step=current_step,
-                    status__in=['pending', 'scheduled']
+                    status__in=['pending', 'scheduled', 'failed']
                 ).first()
                 
                 if existing_message:
-                    logger.debug(f"Message already scheduled for participant {participant.id} at step {current_step.order}")
+                    if existing_message.status == 'failed':
+                        logger.debug(f"Message already exists with failed status for participant {participant.id} at step {current_step.order} - skipping new scheduling")
+                    else:
+                        logger.debug(f"Message already scheduled for participant {participant.id} at step {current_step.order}")
                     return False
                 
                 # Calculate next send time
@@ -630,15 +634,19 @@ class BulkCampaignProcessor:
         try:
             with transaction.atomic():
                 # Check if we already have a message scheduled for this participant
+                # Include 'failed' status to prevent scheduling new messages when there's already a failed one
                 existing_message = BulkCampaignMessage.objects.filter(
                     participant=participant,
                     campaign=participant.nurturing_campaign,
                     message_type='regular',
-                    status__in=['pending', 'scheduled']
+                    status__in=['pending', 'scheduled', 'failed']
                 ).first()
                 
                 if existing_message:
-                    logger.debug(f"Blast message already scheduled for participant {participant.id}")
+                    if existing_message.status == 'failed':
+                        logger.debug(f"Blast message already exists with failed status for participant {participant.id} - skipping new scheduling")
+                    else:
+                        logger.debug(f"Blast message already scheduled for participant {participant.id}")
                     return False
 
                 # Start with the original send time
@@ -1028,9 +1036,10 @@ class BulkCampaignProcessor:
                     scheduled_for = timezone.now()
                 else:
                     # For opt-out notices, we need to check if there are any pending regular messages
+                    # Include 'failed' status to prevent scheduling new opt-out messages when there's already a failed one
                     pending_regular = BulkCampaignMessage.objects.filter(
                         participant=participant,
-                        status__in=['pending', 'scheduled'],
+                        status__in=['pending', 'scheduled', 'failed'],
                         message_type='regular'
                     ).order_by('scheduled_for').first()
                     
