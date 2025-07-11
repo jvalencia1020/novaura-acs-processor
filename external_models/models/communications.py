@@ -426,13 +426,6 @@ class ContactEndpoint(models.Model):
         blank=True,
         related_name='contact_endpoints'
     )
-    campaign = models.ForeignKey(
-        Campaign,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='contact_endpoints'
-    )
     funnel = models.ForeignKey(
         Funnel,
         on_delete=models.SET_NULL,
@@ -461,3 +454,84 @@ class ContactEndpoint(models.Model):
     def get_channel_list(self):
         return [c.channel for c in self.channels.all()]
 
+    def get_campaigns(self):
+        """
+        Get all campaigns this contact endpoint is assigned to.
+        Returns a queryset of Campaign objects.
+        """
+        return Campaign.objects.filter(
+            contact_endpoint_mappings__contact_endpoint=self,
+            contact_endpoint_mappings__is_active=True
+        ).distinct()
+
+    def get_active_campaign_mappings(self):
+        """
+        Get all active campaign mappings for this contact endpoint.
+        Returns a queryset of ContactEndpointCampaign objects.
+        """
+        return self.campaign_mappings.filter(is_active=True)
+
+    def add_to_campaign(self, campaign):
+        """
+        Add this contact endpoint to a campaign.
+        Creates a new mapping if it doesn't exist, or reactivates if inactive.
+        """
+        mapping, created = ContactEndpointCampaign.objects.get_or_create(
+            contact_endpoint=self,
+            campaign=campaign,
+            defaults={'is_active': True}
+        )
+        if not created and not mapping.is_active:
+            mapping.is_active = True
+            mapping.save()
+        return mapping
+
+    def remove_from_campaign(self, campaign):
+        """
+        Remove this contact endpoint from a campaign.
+        Sets the mapping as inactive rather than deleting it.
+        """
+        try:
+            mapping = self.campaign_mappings.get(campaign=campaign)
+            mapping.is_active = False
+            mapping.save()
+            return True
+        except ContactEndpointCampaign.DoesNotExist:
+            return False
+
+
+class ContactEndpointCampaign(models.Model):
+    """
+    Mapping model to handle many-to-many relationship between ContactEndpoint and Campaign.
+    Allows the same contact endpoint to be assigned to multiple campaigns.
+    """
+    contact_endpoint = models.ForeignKey(
+        ContactEndpoint,
+        on_delete=models.CASCADE,
+        related_name='campaign_mappings',
+        help_text="The contact endpoint being mapped to a campaign"
+    )
+    campaign = models.ForeignKey(
+        Campaign,
+        on_delete=models.CASCADE,
+        related_name='contact_endpoint_mappings',
+        help_text="The campaign this contact endpoint is assigned to"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this mapping is currently active"
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'contact_endpoint_campaign'
+        unique_together = ('contact_endpoint', 'campaign')
+        indexes = [
+            models.Index(fields=['contact_endpoint', 'campaign']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.contact_endpoint.value} -> {self.campaign.name}"

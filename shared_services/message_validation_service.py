@@ -34,6 +34,11 @@ class MessageValidationService:
                 logger.warning(f"Participant {participant.id} not eligible for sending")
                 return False
 
+            # Validate campaign has proper contact endpoint mappings
+            if not self._validate_campaign_contact_endpoints(campaign):
+                logger.warning(f"Campaign {campaign.id} has contact endpoint mapping issues")
+                return False
+
             # Validate regular message content
             if campaign.campaign_type == 'reminder':
                 if not regular_message.reminder_message:
@@ -110,6 +115,61 @@ class MessageValidationService:
             logger.exception(f"Message validation failed: {e}")
             return False
 
+    def _validate_campaign_contact_endpoints(self, campaign) -> bool:
+        """
+        Validates that a campaign has proper contact endpoint mappings.
+        Ensures the campaign has access to the necessary contact endpoints for sending messages.
+        
+        Args:
+            campaign: The campaign to validate
+            
+        Returns:
+            bool: True if campaign has proper contact endpoint mappings
+        """
+        try:
+            # If no CRM campaign is associated, we can't validate contact endpoints
+            if not campaign.crm_campaign:
+                logger.debug(f"Campaign {campaign.id} has no CRM campaign associated, skipping contact endpoint validation")
+                return True
+            
+            from external_models.models.communications import ContactEndpoint, ContactEndpointCampaign
+            
+            # Check if there are any active contact endpoints mapped to this campaign
+            # Use the ContactEndpointCampaign mapping table instead of direct foreign key
+            contact_endpoint_mappings = ContactEndpointCampaign.objects.filter(
+                campaign=campaign.crm_campaign,
+                is_active=True,
+                contact_endpoint__channels__channel=campaign.channel
+            ).select_related('contact_endpoint').distinct()
+            
+            if not contact_endpoint_mappings.exists():
+                logger.warning(f"Campaign {campaign.id} has no active contact endpoints mapped for channel {campaign.channel}")
+                return False
+            
+            # Check if the campaign's channel configs have valid from endpoints
+            if campaign.channel == 'sms' and campaign.sms_config:
+                if not campaign.sms_config.from_endpoint:
+                    logger.warning(f"Campaign {campaign.id} SMS config has no from_endpoint specified")
+                    return False
+            elif campaign.channel == 'email' and campaign.email_config:
+                if not campaign.email_config.from_endpoint:
+                    logger.warning(f"Campaign {campaign.id} email config has no from_endpoint specified")
+                    return False
+            elif campaign.channel == 'voice' and campaign.voice_config:
+                if not campaign.voice_config.from_endpoint:
+                    logger.warning(f"Campaign {campaign.id} voice config has no from_endpoint specified")
+                    return False
+            elif campaign.channel == 'chat' and campaign.chat_config:
+                if not campaign.chat_config.from_endpoint:
+                    logger.warning(f"Campaign {campaign.id} chat config has no from_endpoint specified")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.exception(f"Contact endpoint validation failed: {e}")
+            return False
+
     def _validate_channel_requirements(self, campaign, regular_message, opt_out_message=None) -> bool:
         """
         Validates channel-specific requirements for messages.
@@ -166,6 +226,11 @@ class MessageValidationService:
                 logger.warning(f"No valid service phone number found for message {regular_message.id}")
                 return False
 
+            # Validate that the contact endpoint is properly mapped to the campaign
+            if not self._validate_contact_endpoint_mapping(campaign, 'sms', service_phone):
+                logger.warning(f"Service phone number {service_phone} is not properly mapped to campaign {campaign.id}")
+                return False
+
             return True
 
         except Exception as e:
@@ -192,6 +257,11 @@ class MessageValidationService:
 
             if not service_phone:
                 logger.warning(f"No valid service phone number found for message {regular_message.id}")
+                return False
+
+            # Validate that the contact endpoint is properly mapped to the campaign
+            if not self._validate_contact_endpoint_mapping(campaign, 'voice', service_phone):
+                logger.warning(f"Service phone number {service_phone} is not properly mapped to campaign {campaign.id}")
                 return False
 
             # Validate voice platform configuration
@@ -227,6 +297,11 @@ class MessageValidationService:
                 logger.warning(f"No valid from address found for message {regular_message.id}")
                 return False
 
+            # Validate that the contact endpoint is properly mapped to the campaign
+            if not self._validate_contact_endpoint_mapping(campaign, 'email', from_address):
+                logger.warning(f"From address {from_address} is not properly mapped to campaign {campaign.id}")
+                return False
+
             # Check for valid subject
             if not campaign.subject:
                 logger.warning(f"No subject found for message {regular_message.id}")
@@ -236,6 +311,50 @@ class MessageValidationService:
 
         except Exception as e:
             logger.exception(f"Email validation failed: {e}")
+            return False
+
+    def _validate_contact_endpoint_mapping(self, campaign, channel, endpoint_value) -> bool:
+        """
+        Validates that a specific contact endpoint is properly mapped to the campaign.
+        
+        Args:
+            campaign: The campaign to validate
+            channel: The communication channel
+            endpoint_value: The contact endpoint value (phone number, email, etc.)
+            
+        Returns:
+            bool: True if the contact endpoint is properly mapped
+        """
+        try:
+            # If no CRM campaign is associated, we can't validate mappings
+            if not campaign.crm_campaign:
+                return True
+            
+            from external_models.models.communications import ContactEndpoint, ContactEndpointCampaign
+            
+            # Check if the contact endpoint exists and is mapped to this campaign
+            # Use the ContactEndpointCampaign mapping table instead of direct foreign key
+            contact_endpoint_mapping = ContactEndpointCampaign.objects.filter(
+                campaign=campaign.crm_campaign,
+                is_active=True,
+                contact_endpoint__value=endpoint_value,
+                contact_endpoint__channels__channel=channel
+            ).select_related('contact_endpoint').first()
+            
+            if not contact_endpoint_mapping:
+                logger.warning(f"Contact endpoint {endpoint_value} for channel {channel} is not mapped to campaign {campaign.crm_campaign.id}")
+                return False
+            
+            # Check if the contact endpoint is verified (optional but recommended)
+            if not contact_endpoint_mapping.contact_endpoint.is_verified:
+                logger.warning(f"Contact endpoint {endpoint_value} is not verified")
+                # You can choose to return False here if you want to require verification
+                # return False
+            
+            return True
+            
+        except Exception as e:
+            logger.exception(f"Contact endpoint mapping validation failed: {e}")
             return False
 
     def _validate_voice_platform_config(self, message) -> bool:
