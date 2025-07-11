@@ -580,32 +580,45 @@ class BulkCampaignMessage(models.Model):
         return self.campaign.can_send_message(self.participant)
 
     def get_message_content(self):
-        """Get the message content based on campaign type and message step"""
+        """Get the message content based on campaign type and message step with enhanced variable replacement"""
         # Prepare context for variable replacement
         lead = self.participant.lead
         campaign = self.campaign
         context = {
             'lead': {
-                'first_name': lead.first_name,
-                'last_name': lead.last_name,
-                'email': lead.email,
-                'phone_number': lead.phone_number,
-                'company': lead.company_name if hasattr(lead, 'company_name') else None,
-                'title': lead.title if hasattr(lead, 'title') else None,
+                'first_name': lead.first_name or '',
+                'last_name': lead.last_name or '',
+                'email': lead.email or '',
+                'phone_number': lead.phone_number or '',
+                'company': getattr(lead, 'company_name', '') or '',
+                'title': getattr(lead, 'title', '') or '',
+                'channel': getattr(lead, 'channel', '') or '',
+                'source': getattr(lead, 'source', '') or '',
+                'lead_type': getattr(lead, 'lead_type', '') or '',
+                'score': getattr(lead, 'score', 0) or 0,
+                'conversion_probability': getattr(lead, 'conversion_probability', 0) or 0,
+                'is_qualified': getattr(lead, 'is_qualified', False) or False,
+                'is_disqualified': getattr(lead, 'is_disqualified', False) or False,
             },
             'campaign': {
-                'name': campaign.name,
-                'type': campaign.campaign_type,
-                'channel': campaign.channel,
+                'name': campaign.name or '',
+                'type': campaign.campaign_type or '',
+                'channel': campaign.channel or '',
+                'description': getattr(campaign, 'description', '') or '',
             }
         }
 
         # Handle opt-out messages
         if self.message_type == 'opt_out_notice':
-            return campaign.initial_opt_out_notice
+            content = campaign.initial_opt_out_notice or ''
+            return replace_variables(content, context)
         elif self.message_type == 'opt_out_confirmation':
-            return campaign.opt_out_message
+            content = campaign.opt_out_message or ''
+            return replace_variables(content, context)
 
+        # Get content based on campaign type
+        content = ""
+        
         if self.campaign.campaign_type == 'drip' and self.drip_message_step:
             # Get the channel config for the message step
             channel_config = self.drip_message_step.get_channel_config()
@@ -615,9 +628,14 @@ class BulkCampaignMessage(models.Model):
                 
             # Use template if available, otherwise use content
             if channel_config.template:
-                return channel_config.template.replace_variables(context)
+                content = channel_config.template.content or ""
+                logger.debug(f"Using template content for drip step: {content[:100]}...")
             elif channel_config.content:
-                return replace_variables(channel_config.content, context)
+                content = channel_config.content or ""
+                logger.debug(f"Using direct content for drip step: {content[:100]}...")
+            else:
+                logger.error(f"No content found in drip message step {self.drip_message_step.id}")
+                return ""
                 
         elif self.campaign.campaign_type == 'reminder' and self.reminder_message:
             # Get the channel config for the reminder message
@@ -637,31 +655,53 @@ class BulkCampaignMessage(models.Model):
                 
             # Use template if available, otherwise use content
             if channel_config.template:
-                return channel_config.template.replace_variables(context)
+                content = channel_config.template.content or ""
+                logger.debug(f"Using template content for reminder: {content[:100]}...")
             elif channel_config.content:
-                return replace_variables(channel_config.content, context)
+                content = channel_config.content or ""
+                logger.debug(f"Using direct content for reminder: {content[:100]}...")
+            else:
+                logger.error(f"No content found in reminder message {self.reminder_message.id}")
+                return ""
                 
-        # For other campaign types, get the appropriate channel config
-        channel_config = None
-        if campaign.channel == 'email' and campaign.email_config:
-            channel_config = campaign.email_config
-        elif campaign.channel == 'sms' and campaign.sms_config:
-            channel_config = campaign.sms_config
-        elif campaign.channel == 'voice' and campaign.voice_config:
-            channel_config = campaign.voice_config
-        elif campaign.channel == 'chat' and campaign.chat_config:
-            channel_config = campaign.chat_config
+        else:
+            # For other campaign types, get the appropriate channel config
+            channel_config = None
+            if campaign.channel == 'email' and campaign.email_config:
+                channel_config = campaign.email_config
+            elif campaign.channel == 'sms' and campaign.sms_config:
+                channel_config = campaign.sms_config
+            elif campaign.channel == 'voice' and campaign.voice_config:
+                channel_config = campaign.voice_config
+            elif campaign.channel == 'chat' and campaign.chat_config:
+                channel_config = campaign.chat_config
+                
+            if not channel_config:
+                logger.error(f"No channel config found for campaign {campaign.id}")
+                return ""
+                
+            # Use template if available, otherwise use content
+            if channel_config.template:
+                content = channel_config.template.content or ""
+                logger.debug(f"Using template content for campaign: {content[:100]}...")
+            elif channel_config.content:
+                content = channel_config.content or ""
+                logger.debug(f"Using direct content for campaign: {content[:100]}...")
+            else:
+                logger.error(f"No content found in campaign {campaign.id}")
+                return ""
+        
+        # Apply variable replacement
+        if content:
+            processed_content = replace_variables(content, context)
             
-        if not channel_config:
-            logger.error(f"No channel config found for campaign {campaign.id}")
-            return ""
+            # Check if variables were replaced
+            if "{{" in processed_content and "}}" in processed_content:
+                # Try one more time with a more aggressive approach
+                processed_content = replace_variables(processed_content, context)
             
-        # Use template if available, otherwise use content
-        if channel_config.template:
-            return channel_config.template.replace_variables(context)
-        elif channel_config.content:
-            return replace_variables(channel_config.content, context)
-            
+            return processed_content
+        
         return ""
 
     @classmethod
