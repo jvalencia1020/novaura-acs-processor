@@ -208,7 +208,7 @@ class BulkCampaignProcessor:
 
     def _process_drip_campaign(self, campaign):
         """Process a drip campaign"""
-        if not campaign.drip_schedule:
+        if not hasattr(campaign, 'drip_schedule') or not campaign.drip_schedule:
             logger.error(f"Drip campaign {campaign.id} has no schedule")
             return 0
 
@@ -260,7 +260,7 @@ class BulkCampaignProcessor:
 
     def _process_reminder_campaign(self, campaign):
         """Process a reminder campaign"""
-        if not campaign.reminder_schedule:
+        if not hasattr(campaign, 'reminder_schedule') or not campaign.reminder_schedule:
             logger.error(f"Reminder campaign {campaign.id} has no schedule")
             return 0
 
@@ -304,7 +304,7 @@ class BulkCampaignProcessor:
 
     def _process_blast_campaign(self, campaign):
         """Process a blast campaign"""
-        if not campaign.blast_schedule:
+        if not hasattr(campaign, 'blast_schedule') or not campaign.blast_schedule:
             logger.error(f"Blast campaign {campaign.id} has no schedule")
             return 0
 
@@ -444,9 +444,8 @@ class BulkCampaignProcessor:
                 
                 # Calculate next send time
                 now = timezone.now()
-                now_local = convert_from_utc(now, schedule.timezone)
                 delay = current_step.get_delay_timedelta()
-                next_time = now_local + delay
+                next_time = now + delay
                 
                 # Apply schedule restrictions
                 next_time = self.time_calculator.get_next_valid_time(next_time, schedule)
@@ -732,7 +731,7 @@ class BulkCampaignProcessor:
                     return False
 
             # Check if it's time to send blast messages
-            if campaign.campaign_type == 'blast' and campaign.blast_schedule:
+            if campaign.campaign_type == 'blast' and hasattr(campaign, 'blast_schedule') and campaign.blast_schedule:
                 now = timezone.now()
                 if now < campaign.blast_schedule.send_time:
                     logger.debug(f"Cannot send blast message {message.id} - send time not reached yet")
@@ -745,7 +744,7 @@ class BulkCampaignProcessor:
             service_phone = None
             if campaign.channel in ['sms', 'voice']:
                 if message.message_type in ['opt_out_notice', 'opt_out_confirmation']:
-                    if campaign.campaign_type == 'drip':
+                    if campaign.campaign_type == 'drip' and hasattr(campaign, 'drip_schedule') and campaign.drip_schedule:
                         first_step = campaign.drip_schedule.message_steps.order_by('order').first()
                         if first_step:
                             channel_config = first_step.get_channel_config()
@@ -821,9 +820,12 @@ class BulkCampaignProcessor:
                     progress = participant.drip_campaign_progress.first()
                     if progress and progress.current_step == message.drip_message_step:
                         # Find next step
-                        next_step = campaign.drip_schedule.message_steps.filter(
-                            order__gt=message.drip_message_step.order
-                        ).order_by('order').first()
+                        if hasattr(campaign, 'drip_schedule') and campaign.drip_schedule:
+                            next_step = campaign.drip_schedule.message_steps.filter(
+                                order__gt=message.drip_message_step.order
+                            ).order_by('order').first()
+                        else:
+                            next_step = None
                         
                         if next_step:
                             progress.current_step = next_step
@@ -1072,7 +1074,7 @@ class BulkCampaignProcessor:
                         drip_message_step = progress.current_step
                     else:
                         # If no current step, get the first step from the schedule
-                        if campaign.drip_schedule:
+                        if hasattr(campaign, 'drip_schedule') and campaign.drip_schedule:
                             drip_message_step = campaign.drip_schedule.message_steps.order_by('order').first()
                 elif campaign.campaign_type == 'reminder':
                     # For reminder campaigns, we need to find the appropriate reminder message
@@ -1088,7 +1090,7 @@ class BulkCampaignProcessor:
                         reminder_message = recent_regular_message.reminder_message
                     else:
                         # If no recent message found, try to get the first reminder message from the schedule
-                        if campaign.reminder_schedule:
+                        if hasattr(campaign, 'reminder_schedule') and campaign.reminder_schedule:
                             first_reminder_time = campaign.reminder_schedule.reminder_times.order_by(
                                 'days_before', 'days_before_relative', 'hours_before', 'minutes_before'
                             ).first()

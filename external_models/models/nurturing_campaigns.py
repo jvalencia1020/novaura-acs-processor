@@ -941,7 +941,7 @@ class LeadNurturingParticipant(models.Model):
             return 0
 
         campaign = self.nurturing_campaign
-        if not campaign.reminder_schedule:
+        if not hasattr(campaign, 'reminder_schedule') or not campaign.reminder_schedule:
             return 0
 
         # Find the next reminder time that hasn't been sent yet
