@@ -825,13 +825,51 @@ class BulkCampaignMessage(models.Model):
                 raise ValueError("reminder_message is required for reminder campaigns")
             filters['reminder_message'] = reminder_message
         
-        # Exclude cancelled and failed messages from the check
+        # Exclude cancelled, failed, and retry messages from the check
+        # This prevents creating new messages when there are existing failed/retry messages
         existing_message = cls.objects.filter(
             **filters
         ).exclude(
             status__in=['cancelled', 'failed', 'retry']
         ).first()
         
+        return existing_message
+
+    @classmethod
+    def check_existing_retry_message(cls, participant, campaign, message_type, drip_message_step=None, reminder_message=None):
+        """
+        Check if a retry message already exists for the given parameters.
+        Returns the existing retry message if found, None otherwise.
+        
+        This method is specifically for retry logic to find existing retry messages.
+        """
+        # Base filters
+        filters = {
+            'participant': participant,
+            'campaign': campaign,
+            'message_type': message_type,
+            'status': 'retry',  # Only look for retry messages
+        }
+        
+        # Add campaign-specific filters based on campaign type
+        if campaign.campaign_type == 'blast':
+            # For blast campaigns, ensure drip_message_step and reminder_message are NULL
+            filters.update({
+                'drip_message_step__isnull': True,
+                'reminder_message__isnull': True,
+            })
+        elif campaign.campaign_type == 'drip':
+            # For drip campaigns, require drip_message_step to be set
+            if not drip_message_step:
+                raise ValueError("drip_message_step is required for drip campaigns")
+            filters['drip_message_step'] = drip_message_step
+        elif campaign.campaign_type == 'reminder':
+            # For reminder campaigns, require reminder_message to be set
+            if not reminder_message:
+                raise ValueError("reminder_message is required for reminder campaigns")
+            filters['reminder_message'] = reminder_message
+        
+        existing_message = cls.objects.filter(**filters).first()
         return existing_message
 
     @classmethod

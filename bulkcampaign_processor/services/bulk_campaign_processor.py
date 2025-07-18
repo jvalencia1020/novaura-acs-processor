@@ -281,6 +281,19 @@ class BulkCampaignProcessor:
                 logger.warning(f"Message {message.id} cannot be retried - max retries exceeded or invalid status")
                 return False
             
+            # Check if there's already a retry message for this same message configuration
+            existing_retry = BulkCampaignMessage.check_existing_retry_message(
+                participant=message.participant,
+                campaign=message.campaign,
+                message_type=message.message_type,
+                drip_message_step=message.drip_message_step,
+                reminder_message=message.reminder_message
+            )
+            
+            if existing_retry:
+                logger.warning(f"Retry message already exists for message {message.id} - skipping retry creation")
+                return False
+            
             # Mark message for retry
             if message.mark_for_retry():
                 # Calculate retry delay
@@ -524,17 +537,17 @@ class BulkCampaignProcessor:
                     return False
                 
                 # Check if we already have a message scheduled for this step
-                # Include 'failed' status to prevent scheduling new messages when there's already a failed one
+                # Include 'failed' and 'retry' status to prevent scheduling new messages when there's already a failed/retry one
                 existing_message = BulkCampaignMessage.objects.filter(
                     participant=participant,
                     campaign=participant.nurturing_campaign,
                     drip_message_step=current_step,
-                    status__in=['pending', 'scheduled', 'failed']
+                    status__in=['pending', 'scheduled', 'failed', 'retry']
                 ).first()
                 
                 if existing_message:
-                    if existing_message.status == 'failed':
-                        logger.debug(f"Message already exists with failed status for participant {participant.id} at step {current_step.order} - skipping new scheduling")
+                    if existing_message.status in ['failed', 'retry']:
+                        logger.debug(f"Message already exists with {existing_message.status} status for participant {participant.id} at step {current_step.order} - skipping new scheduling")
                     else:
                         logger.debug(f"Message already scheduled for participant {participant.id} at step {current_step.order}")
                     return False
@@ -730,17 +743,17 @@ class BulkCampaignProcessor:
         try:
             with transaction.atomic():
                 # Check if we already have a message scheduled for this participant
-                # Include 'failed' status to prevent scheduling new messages when there's already a failed one
+                # Include 'failed' and 'retry' status to prevent scheduling new messages when there's already a failed/retry one
                 existing_message = BulkCampaignMessage.objects.filter(
                     participant=participant,
                     campaign=participant.nurturing_campaign,
                     message_type='regular',
-                    status__in=['pending', 'scheduled', 'failed']
+                    status__in=['pending', 'scheduled', 'failed', 'retry']
                 ).first()
                 
                 if existing_message:
-                    if existing_message.status == 'failed':
-                        logger.debug(f"Blast message already exists with failed status for participant {participant.id} - skipping new scheduling")
+                    if existing_message.status in ['failed', 'retry']:
+                        logger.debug(f"Blast message already exists with {existing_message.status} status for participant {participant.id} - skipping new scheduling")
                     else:
                         logger.debug(f"Blast message already scheduled for participant {participant.id}")
                     return False
