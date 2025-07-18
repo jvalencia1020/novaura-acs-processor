@@ -92,7 +92,7 @@ class BulkCampaignProcessor:
         """
         # Find all pending messages that are due from active campaigns only
         due_messages = BulkCampaignMessage.objects.filter(
-            status__in=['pending', 'scheduled', 'failed'],  # Only include failed status for retry
+            status__in=['pending', 'scheduled', 'failed', 'retry'],  # Include retry status for retry functionality
             scheduled_for__lte=timezone.now(),
             campaign__active=True,  # Only include messages from active campaigns
             campaign__status__in=['active', 'scheduled']  # Only include messages from active or scheduled campaigns
@@ -116,6 +116,17 @@ class BulkCampaignProcessor:
                 if not message.campaign.is_active_or_scheduled():
                     logger.warning(f"Skipping message {message.id} from inactive campaign {message.campaign.id} - Status: {message.campaign.status}")
                     continue
+
+                # Handle retry logic for failed messages
+                if message.status == 'failed':
+                    if self._handle_failed_message_retry(message):
+                        # Message was marked for retry, skip processing for now
+                        continue
+                    else:
+                        # Message cannot be retried, mark as final failure
+                        logger.warning(f"Message {message.id} cannot be retried, marking as final failure")
+                        message.update_status('failed', {'error': 'Max retries exceeded'})
+                        continue
 
                 # Get all messages in the group
                 related_messages = BulkCampaignMessage.objects.filter(
@@ -205,6 +216,92 @@ class BulkCampaignProcessor:
                 )
 
         return processed_count
+
+    def process_retry_messages(self):
+        """
+        Process all messages that are marked for retry and are due to be sent
+        This can be called by external schedulers to handle retry messages
+        
+        Returns:
+            int: Number of retry messages processed
+        """
+        # Find all retry messages that are due
+        retry_messages = BulkCampaignMessage.objects.filter(
+            status='retry',
+            scheduled_for__lte=timezone.now(),
+            campaign__active=True,
+            campaign__status__in=['active', 'scheduled']
+        ).select_related(
+            'campaign',
+            'participant',
+            'participant__lead',
+            'message_group'
+        ).order_by('scheduled_for')
+
+        processed_count = 0
+
+        for message in retry_messages:
+            try:
+                # Check if the campaign is still active
+                if not message.campaign.is_active_or_scheduled():
+                    logger.warning(f"Skipping retry message {message.id} from inactive campaign {message.campaign.id}")
+                    continue
+
+                # Attempt to send the retry message
+                if self._send_message(message):
+                    processed_count += 1
+                    logger.info(f"Successfully processed retry message {message.id} (attempt {message.retry_count})")
+                else:
+                    # Message failed again, handle retry logic
+                    if self._handle_failed_message_retry(message):
+                        logger.info(f"Retry message {message.id} marked for next retry attempt")
+                    else:
+                        logger.warning(f"Retry message {message.id} exceeded max retries, marking as final failure")
+
+            except Exception as e:
+                logger.exception(f"Error processing retry message {message.id}: {e}")
+                # Mark as failed if we can't process it
+                message.update_status('failed', {'error': f'Processing error: {str(e)}'})
+
+        return processed_count
+
+    def _handle_failed_message_retry(self, message):
+        """
+        Handle retry logic for a failed message
+        
+        Args:
+            message: BulkCampaignMessage instance that failed
+            
+        Returns:
+            bool: True if message was marked for retry, False if max retries exceeded
+        """
+        try:
+            # Check if message can be retried
+            if not message.can_retry():
+                logger.warning(f"Message {message.id} cannot be retried - max retries exceeded or invalid status")
+                return False
+            
+            # Mark message for retry
+            if message.mark_for_retry():
+                # Calculate retry delay
+                delay_minutes = message.get_retry_delay_minutes()
+                
+                # Calculate next retry time
+                next_retry_time = timezone.now() + timedelta(minutes=delay_minutes)
+                
+                # Update scheduled_for to the retry time
+                message.scheduled_for = next_retry_time
+                message.save()
+                
+                logger.info(f"Message {message.id} marked for retry in {delay_minutes} minutes (attempt {message.retry_count})")
+                return True
+            else:
+                logger.warning(f"Failed to mark message {message.id} for retry")
+                return False
+                
+        except Exception as e:
+            logger.exception(f"Error handling retry for message {message.id}: {e}")
+            return False
 
     def _process_drip_campaign(self, campaign):
         """Process a drip campaign"""
@@ -710,6 +807,17 @@ class BulkCampaignProcessor:
             campaign = message.campaign
             participant = message.participant
 
+            # Check if message can be sent (including retry status)
+            if not message.can_be_sent() and message.status != 'retry':
+                logger.debug(f"Cannot send message {message.id} - status: {message.status}")
+                return False
+
+            # For retry messages, check if it's time to retry
+            if message.status == 'retry':
+                if message.scheduled_for and message.scheduled_for > timezone.now():
+                    logger.debug(f"Retry message {message.id} not yet due - scheduled for {message.scheduled_for}")
+                    return False
+
             # Check if message can be sent
             if not campaign.can_send_message(participant):
                 logger.debug(f"Cannot send message {message.id} - campaign or participant not active")
@@ -833,8 +941,11 @@ class BulkCampaignProcessor:
                             progress.current_step = None
                         progress.save()
 
+                logger.info(f"Successfully sent message {message.id} (retry attempt: {message.retry_count})")
                 return True
 
+            # Message failed to send
+            logger.warning(f"Failed to send message {message.id} (retry attempt: {message.retry_count})")
             return False
 
         except Exception as e:

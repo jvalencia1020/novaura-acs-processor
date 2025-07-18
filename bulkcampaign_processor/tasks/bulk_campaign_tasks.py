@@ -42,4 +42,14 @@ def process_due_messages():
     """
     processor = BulkCampaignProcessor()
     processed_count = processor.process_due_messages()
+    return processed_count
+
+
+def process_retry_messages():
+    """
+    Process all messages that are marked for retry and are due to be sent
+    This should be run frequently (e.g., every 5 minutes) by a scheduled task
+    """
+    processor = BulkCampaignProcessor()
+    processed_count = processor.process_retry_messages()
     return processed_count 

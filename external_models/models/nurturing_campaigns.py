@@ -130,6 +130,20 @@ class LeadNurturingCampaign(models.Model):
         help_text="Message to send when a participant opts out"
     )
 
+    # Retry configuration
+    retry_strategy = models.ForeignKey(
+        'RetryStrategy',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Retry strategy for failed messages in this campaign"
+    )
+    max_retries = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Override max retries for this campaign (uses retry strategy default if not set)"
+    )
+
     class Meta:
         managed = False
         db_table = 'acs_leadnurturingcampaign'
@@ -362,6 +376,21 @@ class LeadNurturingCampaign(models.Model):
             
         return ""
 
+    def get_retry_strategy(self):
+        """Get the effective retry strategy for this campaign"""
+        if self.retry_strategy:
+            return self.retry_strategy
+        # Use default strategy if none specified
+        from .nurturing_campaign_base import RetryStrategy
+        return RetryStrategy.get_default_strategy()
+
+    def get_max_retries(self):
+        """Get the effective max retries for this campaign"""
+        if self.max_retries is not None:
+            return self.max_retries
+        # Use retry strategy default if not overridden
+        return self.get_retry_strategy().max_attempts
+
 class BulkCampaignMessageGroup(models.Model):
     """
     Model to group related bulk campaign messages together for a participant.
@@ -413,6 +442,7 @@ class BulkCampaignMessage(models.Model):
         ('sent', 'Sent'),
         ('delivered', 'Delivered'),
         ('failed', 'Failed'),
+        ('retry', 'Retry'),  # NEW STATUS
         ('opened', 'Opened'),
         ('clicked', 'Clicked'),
         ('replied', 'Replied'),
@@ -475,6 +505,24 @@ class BulkCampaignMessage(models.Model):
 
     message_type = models.CharField(max_length=20, choices=MESSAGE_TYPES, default='regular')
 
+    # Retry tracking fields
+    retry_count = models.PositiveIntegerField(default=0)
+    last_retry_at = models.DateTimeField(null=True, blank=True)
+
+    # Retry configuration (optional - can use campaign-level defaults)
+    retry_strategy = models.ForeignKey(
+        'RetryStrategy',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Custom retry strategy for this message (uses campaign default if not set)"
+    )
+    max_retries = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Override max retries for this message (uses campaign default if not set)"
+    )
+
     class Meta:
         managed = False
         db_table = 'bulk_campaign_message'
@@ -487,6 +535,8 @@ class BulkCampaignMessage(models.Model):
             models.Index(fields=['step_order']),
             models.Index(fields=['reminder_message']),
             models.Index(fields=['message_group']),
+            models.Index(fields=['status', 'retry_count']),
+            models.Index(fields=['last_retry_at']),
         ]
         # Unique constraints to prevent duplicate message scheduling
         constraints = [
@@ -569,9 +619,44 @@ class BulkCampaignMessage(models.Model):
 
         self.save()
 
+    def get_retry_strategy(self):
+        """Get the effective retry strategy for this message"""
+        if self.retry_strategy:
+            return self.retry_strategy
+        return self.campaign.get_retry_strategy()
+
+    def get_max_retries(self):
+        """Get the effective max retries for this message"""
+        if self.max_retries is not None:
+            return self.max_retries
+        return self.campaign.get_max_retries()
+
+    def can_retry(self):
+        """Check if message can be retried"""
+        return self.status == 'failed' and self.retry_count < self.get_max_retries()
+
+    def mark_for_retry(self, retry_count=None):
+        """Mark message for retry by external processor"""
+        if not self.can_retry():
+            return False
+        
+        self.retry_count = retry_count or (self.retry_count + 1)
+        self.status = 'retry'
+        self.last_retry_at = timezone.now()
+        self.save()
+        return True
+
+    def get_retry_delay_minutes(self):
+        """Calculate the delay in minutes for the next retry attempt"""
+        if self.retry_count == 0:
+            return 0
+        
+        strategy = self.get_retry_strategy()
+        return strategy.get_delay_for_attempt(self.retry_count)
+
     def can_be_sent(self):
         """Check if the message can be sent"""
-        if self.status not in ['pending', 'scheduled']:
+        if self.status not in ['pending', 'scheduled', 'retry']:
             return False
 
         if self.scheduled_for and self.scheduled_for > timezone.now():
@@ -744,7 +829,7 @@ class BulkCampaignMessage(models.Model):
         existing_message = cls.objects.filter(
             **filters
         ).exclude(
-            status__in=['cancelled', 'failed']
+            status__in=['cancelled', 'failed', 'retry']
         ).first()
         
         return existing_message
