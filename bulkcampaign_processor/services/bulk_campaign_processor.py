@@ -451,8 +451,6 @@ class BulkCampaignProcessor:
 
         return scheduled_count
 
-
-
     def _get_next_reminder_time(self, participant, schedule):
         """Get the next reminder time for a participant"""
         # Get all reminder times ordered appropriately

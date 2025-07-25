@@ -257,8 +257,15 @@ class TimeCalculationService:
             # Check if current time falls within any time slot
             current_time_only = current_time.time()
             for time_slot in operating_hours.time_slots.all():
-                if time_slot.start_time <= current_time_only < time_slot.end_time:
-                    return True
+                # Handle time slots that span across midnight
+                if time_slot.end_time <= time_slot.start_time:
+                    # Time slot spans midnight (e.g., 14:00 to 00:00)
+                    if current_time_only >= time_slot.start_time or current_time_only < time_slot.end_time:
+                        return True
+                else:
+                    # Normal time slot within same day
+                    if time_slot.start_time <= current_time_only < time_slot.end_time:
+                        return True
 
             return False
 
@@ -308,15 +315,29 @@ class TimeCalculationService:
                     # Check if current time is within any time slot
                     current_time_only = next_time.time()
                     for time_slot in operating_hours.time_slots.all():
-                        if current_time_only < time_slot.start_time:
-                            # Current time is before this time slot starts
-                            # Return the start time of this slot
-                            return timezone.make_aware(
-                                timezone.datetime.combine(next_time.date(), time_slot.start_time)
-                            )
-                        elif time_slot.start_time <= current_time_only < time_slot.end_time:
-                            # Current time is within this time slot
-                            return next_time
+                        # Handle time slots that span across midnight
+                        if time_slot.end_time <= time_slot.start_time:
+                            # Time slot spans midnight (e.g., 14:00 to 00:00)
+                            if current_time_only < time_slot.start_time:
+                                # Current time is before this time slot starts
+                                # Return the start time of this slot
+                                return timezone.make_aware(
+                                    timezone.datetime.combine(next_time.date(), time_slot.start_time)
+                                )
+                            elif current_time_only >= time_slot.start_time or current_time_only < time_slot.end_time:
+                                # Current time is within this time slot
+                                return next_time
+                        else:
+                            # Normal time slot within same day
+                            if current_time_only < time_slot.start_time:
+                                # Current time is before this time slot starts
+                                # Return the start time of this slot
+                                return timezone.make_aware(
+                                    timezone.datetime.combine(next_time.date(), time_slot.start_time)
+                                )
+                            elif time_slot.start_time <= current_time_only < time_slot.end_time:
+                                # Current time is within this time slot
+                                return next_time
 
                     # Current time is after all time slots for this day
                     # Move to next day and try again
