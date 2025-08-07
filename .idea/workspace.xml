@@ -6,9 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared_services/time_calculation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/time_calculation_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared_services/voice_platforms/bland_ai_platform.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/voice_platforms/bland_ai_platform.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -33,7 +30,7 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "Python.process_bulk_campaigns.executor": "Run",
-    "Python.process_due_messages.executor": "Run",
+    "Python.process_due_messages.executor": "Debug",
     "Python.run_bulk_campaign_processor.executor": "Run",
     "Python.worker.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
@@ -278,11 +275,6 @@
           <option name="timeStamp" value="54" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/shared_services/voice_platforms/bland_ai_platform.py</url>
-          <line>123</line>
-          <option name="timeStamp" value="56" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/shared_services/time_calculation_service.py</url>
           <line>159</line>
           <option name="timeStamp" value="57" />
@@ -346,6 +338,11 @@
           <url>file://$PROJECT_DIR$/external_models/models/nurturing_campaigns.py</url>
           <line>220</line>
           <option name="timeStamp" value="87" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
+          <line>108</line>
+          <option name="timeStamp" value="88" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
