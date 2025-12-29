@@ -103,4 +103,34 @@ resource "aws_sqs_queue" "push_events" {
     Name        = "Novaura ACS Push Events Queue"
     Environment = var.environment
   }
+}
+
+# SMS Marketing Channel Queues
+resource "aws_sqs_queue" "sms_marketing_events_dlq" {
+  name                      = "novaura-acs-sms-marketing-events-dlq"
+  message_retention_seconds = 1209600  # 14 days
+  
+  tags = {
+    Name        = "Novaura ACS SMS Marketing Events Dead Letter Queue"
+    Environment = var.environment
+    Service     = "sms-marketing-processor"
+  }
+}
+
+resource "aws_sqs_queue" "sms_marketing_events" {
+  name                       = "novaura-acs-sms-marketing-events"
+  visibility_timeout_seconds = 300  # 5 minutes
+  message_retention_seconds  = 345600  # 4 days
+  receive_wait_time_seconds  = 20  # Long polling
+  
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.sms_marketing_events_dlq.arn
+    maxReceiveCount     = 3
+  })
+  
+  tags = {
+    Name        = "Novaura ACS SMS Marketing Events Queue"
+    Environment = var.environment
+    Service     = "sms-marketing-processor"
+  }
 } 

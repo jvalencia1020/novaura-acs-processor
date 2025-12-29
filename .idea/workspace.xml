@@ -5,7 +5,27 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/marketing_tracking/models/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/marketing_tracking/models/cta_models.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/marketing_tracking/models/identity_graph.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/marketing_tracking/models/marketing_attribution.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/marketing_tracking/services.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sms_marketing/models/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sms_marketing/models/campaign.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sms_marketing/models/event.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sms_marketing/models/message.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sms_marketing/models/program.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sms_marketing/models/rule.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/sms_marketing/models/subscriber.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.github/workflows/deploy.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/deploy.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/base.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/lead_matching_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/lead_matching_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/autoscaling.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/autoscaling.tf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/ecs.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/ecs.tf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/iam.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/iam.tf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/main.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/main.tf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/sqs.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/sqs.tf" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -30,16 +50,25 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "Python.process_bulk_campaigns.executor": "Run",
-    "Python.process_due_messages.executor": "Debug",
+    "Python.process_due_messages.executor": "Run",
     "Python.run_bulk_campaign_processor.executor": "Run",
+    "Python.sms_marketing_messages.executor": "Run",
     "Python.worker.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/marketing_tracking/models",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
-  <component name="RunManager" selected="Python.process_due_messages">
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/marketing_tracking/models" />
+      <recent name="$PROJECT_DIR$/marketing_tracking" />
+      <recent name="$PROJECT_DIR$/sms_marketing" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Python.sms_marketing_messages">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
@@ -160,6 +189,30 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="sms_marketing_messages" type="PythonConfigurationType" factoryName="Python">
+      <module name="novaura-acs-processor" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+        <env name="DJANGO_SETTINGS_MODULE" value="acs_personalization.settings.dev" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="SDK_NAME" value="Python 3.12 (novaura-acs-processor)" />
+      <option name="WORKING_DIRECTORY" value="" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/manage.py" />
+      <option name="PARAMETERS" value="run_sms_marketing_worker" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="worker" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
@@ -186,6 +239,7 @@
     </configuration>
     <list>
       <item itemvalue="Python.process_due_messages" />
+      <item itemvalue="Python.sms_marketing_messages" />
       <item itemvalue="Python.worker" />
       <item itemvalue="Python.process_bulk_campaigns" />
       <item itemvalue="Python.run_bulk_campaign_processor" />
@@ -341,8 +395,8 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>108</line>
-          <option name="timeStamp" value="88" />
+          <line>852</line>
+          <option name="timeStamp" value="89" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

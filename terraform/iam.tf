@@ -106,7 +106,9 @@ resource "aws_iam_role_policy" "ecs_task_role_policy" {
           aws_sqs_queue.email_events.arn,
           aws_sqs_queue.email_events_dlq.arn,
           aws_sqs_queue.push_events.arn,
-          aws_sqs_queue.push_events_dlq.arn
+          aws_sqs_queue.push_events_dlq.arn,
+          aws_sqs_queue.sms_marketing_events.arn,
+          aws_sqs_queue.sms_marketing_events_dlq.arn
         ]
       },
       {
@@ -119,6 +121,35 @@ resource "aws_iam_role_policy" "ecs_task_role_policy" {
           var.django_secret_key_arn,
           var.bland_ai_api_key_arn
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion"
+        ]
+        Resource = [
+          "arn:aws:s3:::novaura-acs-sms-marketing-*/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "s3:ResourceAccount" = "054037109114"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::novaura-acs-sms-marketing-*"
+        ]
+        Condition = {
+          StringEquals = {
+            "s3:ResourceAccount" = "054037109114"
+          }
+        }
       }
     ]
   })

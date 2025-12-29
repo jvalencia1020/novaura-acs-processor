@@ -1,6 +1,7 @@
 import logging
 import re
 from typing import Optional, Dict, Any
+from django.db.models import Q
 from external_models.models.external_references import Lead
 from external_models.models.nurturing_campaigns import LeadNurturingCampaign, LeadNurturingParticipant
 
@@ -54,7 +55,7 @@ class LeadMatchingService:
     
     def get_lead_by_phone(self, phone_number: str) -> Optional[Lead]:
         """
-        Find a lead by phone number.
+        Find a lead by phone number (tries multiple formats).
         
         Args:
             phone_number: The phone number to search for
@@ -65,22 +66,53 @@ class LeadMatchingService:
         if not phone_number:
             return None
         
-        # Clean phone number
-        clean_phone = self.clean_phone_number(phone_number)
+        # Normalize to E.164
+        normalized = self.clean_phone_number(phone_number)
         
         try:
-            # Search for lead by phone number
-            lead = Lead.objects.filter(phone_number=clean_phone).first()
+            # Try exact match first
+            lead = Lead.objects.filter(phone_number=normalized).first()
             if lead:
                 return lead
             
-            # If not found, you might want to create a new lead
-            # This depends on your business logic
-            logger.info(f"No lead found for phone number: {clean_phone}")
+            # Try other phone fields if they exist
+            # Remove + and try without country code
+            digits_only = re.sub(r'[^\d]', '', normalized)
+            
+            # Generate phone number variations
+            variations = [normalized]
+            
+            # Try with and without country code
+            if len(digits_only) == 10:
+                # US format - try with +1
+                variations.append(f"+1{digits_only}")
+                variations.append(digits_only)
+            elif len(digits_only) == 11 and digits_only.startswith('1'):
+                # US format with country code
+                variations.append(f"+{digits_only}")
+                variations.append(digits_only[1:])  # Without leading 1
+            else:
+                variations.append(digits_only)
+            
+            # Try all variations
+            for variation in variations:
+                if not variation:
+                    continue
+                # Try phone_number field and other common phone fields
+                lead = Lead.objects.filter(
+                    Q(phone_number=variation) |
+                    Q(phone_number_2=variation) |
+                    Q(mobile_phone=variation)
+                ).first()
+                if lead:
+                    logger.info(f"Found lead using phone variation: {variation}")
+                    return lead
+            
+            logger.info(f"No lead found for phone number: {normalized}")
             return None
             
         except Exception as e:
-            logger.error(f"Error finding lead by phone {clean_phone}: {e}")
+            logger.error(f"Error finding lead by phone {normalized}: {e}")
             return None
     
     def get_lead_by_email(self, email: str) -> Optional[Lead]:
@@ -133,9 +165,9 @@ class LeadMatchingService:
         # Try other fields
         try:
             lead = Lead.objects.filter(
-                models.Q(first_name__icontains=identifier) |
-                models.Q(last_name__icontains=identifier) |
-                models.Q(company__icontains=identifier)
+                Q(first_name__icontains=identifier) |
+                Q(last_name__icontains=identifier) |
+                Q(company__icontains=identifier)
             ).first()
             
             if lead:

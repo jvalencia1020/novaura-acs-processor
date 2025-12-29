@@ -50,6 +50,8 @@ INSTALLED_APPS = [
     'journey_processor',
     'bulkcampaign_processor',
     'communication_processor',
+    'sms_marketing',
+    'marketing_tracking',
 
     # External models for ORM access to existing tables
     'external_models',
@@ -155,6 +157,26 @@ JOURNEY_PROCESSOR_LOG_LEVEL = os.getenv('JOURNEY_PROCESSOR_LOG_LEVEL', 'INFO')
 SMS_QUEUE_URL = os.getenv('SMS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-sms-events')
 EMAIL_QUEUE_URL = os.getenv('EMAIL_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-email-events')
 
+# SMS Marketing Queue Configuration
+SMS_MARKETING_QUEUE_URL = os.getenv('SMS_MARKETING_QUEUE_URL')
+SMS_MARKETING_DLQ_URL = os.getenv('SMS_MARKETING_DLQ_URL')  # Optional
+
+# S3 Configuration (if messages are stored in S3)
+SMS_MARKETING_S3_BUCKET = os.getenv('SMS_MARKETING_S3_BUCKET')
+SMS_MARKETING_S3_REGION = os.getenv('SMS_MARKETING_S3_REGION', 'us-east-1')
+
+# SMS Marketing Processing Settings
+SMS_MARKETING_PROCESSING_ENABLED = os.getenv('SMS_MARKETING_PROCESSING_ENABLED', 'True').lower() == 'true'
+SMS_MARKETING_MAX_RETRIES = int(os.getenv('SMS_MARKETING_MAX_RETRIES', '3'))
+SMS_MARKETING_VISIBILITY_TIMEOUT = int(os.getenv('SMS_MARKETING_VISIBILITY_TIMEOUT', '300'))
+
+# SQS Queue URLs dict (for consistency)
+SQS_QUEUE_URLS = {
+    'sms': SMS_QUEUE_URL,
+    'email': EMAIL_QUEUE_URL,
+    'sms_marketing': SMS_MARKETING_QUEUE_URL,
+}
+
 # Redis cache for locking if needed
 CACHES = {
     'default': {
@@ -207,6 +229,11 @@ LOGGING = {
             'propagate': False,
         },
         'communication_processor': {
+            'handlers': ['console'],
+            'level': JOURNEY_PROCESSOR_LOG_LEVEL,
+            'propagate': False,
+        },
+        'sms_marketing': {
             'handlers': ['console'],
             'level': JOURNEY_PROCESSOR_LOG_LEVEL,
             'propagate': False,

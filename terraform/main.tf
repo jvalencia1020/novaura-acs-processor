@@ -73,6 +73,12 @@ variable "communication_worker_count" {
   default     = 2
 }
 
+variable "sms_marketing_worker_count" {
+  description = "Number of SMS marketing worker tasks"
+  type        = number
+  default     = 1
+}
+
 variable "ecr_repository_url" {
   description = "ECR repository URL"
   type        = string
