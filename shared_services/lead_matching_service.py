@@ -98,12 +98,8 @@ class LeadMatchingService:
             for variation in variations:
                 if not variation:
                     continue
-                # Try phone_number field and other common phone fields
-                lead = Lead.objects.filter(
-                    Q(phone_number=variation) |
-                    Q(phone_number_2=variation) |
-                    Q(mobile_phone=variation)
-                ).first()
+                # Try phone_number field (only field available on Lead model)
+                lead = Lead.objects.filter(phone_number=variation).first()
                 if lead:
                     logger.info(f"Found lead using phone variation: {variation}")
                     return lead

@@ -15,6 +15,7 @@ from django.utils import timezone
 from django.db import transaction
 
 from sms_marketing.services.processor import SMSMarketingProcessor
+from sms_marketing.models import SmsMessage
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class Command(BaseCommand):
                 response = sqs.receive_message(
                     QueueUrl=queue_url,
                     MaxNumberOfMessages=10,
-                    WaitTimeSeconds=20,  # Long polling
+                    WaitTimeSeconds=10,  # Long polling - reduced to 10s for more frequent database checks
                     AttributeNames=['All'],
                     MessageAttributeNames=['All']
                 )
@@ -74,8 +75,8 @@ class Command(BaseCommand):
                 messages = response.get('Messages', [])
 
                 if messages:
-                    logger.info(f"Processing {len(messages)} messages")
-                    self.stdout.write(f"Processing {len(messages)} messages")
+                    logger.info(f"Processing {len(messages)} messages from SQS")
+                    self.stdout.write(f"Processing {len(messages)} messages from SQS")
 
                     for message in messages:
                         try:
@@ -127,6 +128,9 @@ class Command(BaseCommand):
                         except Exception as e:
                             logger.exception(f"Error processing message: {e}")
                             self._handle_failed_message(sqs, queue_url, message, str(e))
+                else:
+                    # SQS queue is empty, check database for pending messages as fallback
+                    self._process_pending_from_database(processor, limit=5)
 
             except ClientError as e:
                 error_code = e.response['Error']['Code']
@@ -150,6 +154,52 @@ class Command(BaseCommand):
         except Exception as e:
             logger.error(f"Error loading from S3: {e}")
             raise
+
+    def _process_pending_from_database(self, processor, limit=5):
+        """
+        Process pending messages directly from database as fallback.
+        Only processes messages older than 1 minute to avoid race conditions.
+        """
+        try:
+            # Find messages that are pending and older than 1 minute (to avoid race conditions)
+            cutoff_time = timezone.now() - timezone.timedelta(minutes=1)
+            
+            pending_messages = SmsMessage.objects.filter(
+                processing_status='pending',
+                direction='inbound',
+                created_at__lt=cutoff_time  # Only process messages older than 1 minute
+            ).order_by('created_at')[:limit]
+            
+            if pending_messages.exists():
+                count = pending_messages.count()
+                logger.info(f"Found {count} pending messages in database, processing as fallback...")
+                
+                for msg in pending_messages:
+                    try:
+                        # Prepare message data as if it came from SQS
+                        message_data = {
+                            'sms_message_id': msg.id,
+                            'message_sid': msg.provider_message_id,
+                            'from_number': msg.from_number,
+                            'to_number': msg.to_number,
+                            'body': msg.body_raw,
+                            'body_normalized': msg.body_normalized,
+                            'endpoint_id': msg.endpoint.id if msg.endpoint else None,
+                        }
+                        
+                        with transaction.atomic():
+                            success = processor.process_inbound_message(message_data)
+                        
+                        if success:
+                            logger.info(f"Processed pending message {msg.id} from database (fallback)")
+                        else:
+                            logger.warning(f"Failed to process pending message {msg.id} from database")
+                            
+                    except Exception as e:
+                        logger.exception(f"Error processing pending message {msg.id} from database: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Error checking for pending messages in database: {e}", exc_info=True)
 
     def _handle_failed_message(self, sqs, queue_url, message, error_reason):
         """Handle a failed message by moving it to DLQ if configured"""

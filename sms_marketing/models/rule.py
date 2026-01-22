@@ -1,5 +1,6 @@
 from django.db import models
 from django.core.exceptions import ValidationError
+from marketing_tracking.models import Keyword
 
 
 class SmsKeywordRule(models.Model):
@@ -19,7 +20,7 @@ class SmsKeywordRule(models.Model):
         help_text='Campaign this rule belongs to'
     )
     keyword = models.ForeignKey(
-        'marketing_tracking.Keyword',
+        Keyword,
         on_delete=models.CASCADE,
         related_name='sms_keyword_rules',
         help_text='Keyword inventory item for this rule'
@@ -78,7 +79,7 @@ class SmsKeywordRule(models.Model):
             raise ValidationError("Keyword is required")
         if not self.action_type:
             raise ValidationError("Action type is required")
-        
+
         # Validate that keyword's endpoint matches campaign's endpoint
         if self.keyword and self.campaign and self.campaign.endpoint:
             if self.keyword.endpoint != self.campaign.endpoint:

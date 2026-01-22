@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 from django.utils import timezone
 from django.db import transaction
 from external_models.models.communications import ContactEndpoint
-from sms_marketing.models import SmsMessage, SmsSubscriber, SmsCampaignEvent
+from sms_marketing.models import SmsMessage, SmsSubscriber, SmsCampaignEvent, SmsKeywordCampaign
 from sms_marketing.services.router import SMSMarketingRouter
 from sms_marketing.services.state import SMSMarketingStateManager
 from sms_marketing.services.actions import SMSMarketingActionExecutor
@@ -77,7 +77,12 @@ class SMSMarketingProcessor:
                 # Check if this is a confirmation keyword
                 # We need to find the campaign that triggered the pending state
                 # For now, check all active campaigns for this endpoint
-                campaigns = endpoint.sms_keyword_campaigns.filter(status='active')
+                # Use direct model manager query (same pattern as router.py) for consistency
+                campaigns = SmsKeywordCampaign.objects.filter(
+                    endpoint=endpoint,
+                    status='active'
+                ).order_by('-priority', 'id')
+
                 for campaign in campaigns:
                     if self.state_manager.is_confirmation_keyword(keyword_candidate, campaign):
                         # Complete double opt-in
@@ -92,12 +97,12 @@ class SMSMarketingProcessor:
                             self.action_executor._send_welcome_message(campaign, subscriber, action_config)
                         
                         # Update message with campaign/rule/subscriber links
-                        message.campaign = campaign
+                        message.sms_campaign = campaign  # Field name is sms_campaign
                         message.rule = rule
                         message.subscriber = subscriber
-                        message.processing_status = 'completed'
+                        message.processing_status = 'processed'  # Use 'processed' not 'completed'
                         message.processed_at = timezone.now()
-                        message.save(update_fields=['campaign', 'rule', 'subscriber', 'processing_status', 'processed_at'])
+                        message.save(update_fields=['sms_campaign', 'rule', 'subscriber', 'processing_status', 'processed_at'])
                         
                         # Log event
                         self._log_event(
@@ -131,7 +136,7 @@ class SMSMarketingProcessor:
                 return self._handle_global_help(subscriber, message, endpoint)
             
             # Update message with campaign/rule/subscriber links
-            message.campaign = route_result.campaign
+            message.sms_campaign = route_result.campaign  # Field name is sms_campaign
             message.rule = route_result.rule
             message.subscriber = subscriber
             message.save()
@@ -167,9 +172,9 @@ class SMSMarketingProcessor:
                 execution_result.event_type, execution_result.payload
             )
             
-            # Mark as completed if successful
+            # Mark as processed if successful
             if execution_result.success:
-                message.processing_status = 'completed'
+                message.processing_status = 'processed'  # Use 'processed' not 'completed'
                 message.processed_at = timezone.now()
                 message.save(update_fields=['processing_status', 'processed_at'])
             else:
@@ -241,7 +246,7 @@ class SMSMarketingProcessor:
         
         # Update message with subscriber link
         message.subscriber = subscriber
-        message.processing_status = 'completed'
+        message.processing_status = 'processed'  # Use 'processed' not 'completed'
         message.processed_at = timezone.now()
         message.save(update_fields=['subscriber', 'processing_status', 'processed_at'])
         
@@ -283,7 +288,23 @@ class SMSMarketingProcessor:
     def _handle_fallback(self, endpoint: ContactEndpoint, subscriber: SmsSubscriber, message: SmsMessage) -> bool:
         """Handle fallback when no rule matches"""
         # Get campaigns for this endpoint
-        campaigns = endpoint.sms_keyword_campaigns.filter(status='active').order_by('-priority')
+        # Use direct model manager query (same pattern as router.py) for consistency
+        campaigns = SmsKeywordCampaign.objects.filter(
+            endpoint=endpoint,
+            status='active'
+        ).order_by('-priority', 'id')
+        
+        logger.debug(
+            f"Fallback: Found {campaigns.count()} active campaigns for endpoint {endpoint.id} "
+            f"(endpoint value: {endpoint.value})"
+        )
+        
+        if campaigns.count() == 0:
+            logger.warning(
+                f"No active campaigns found for endpoint {endpoint.id}. "
+                f"Total campaigns for endpoint: {SmsKeywordCampaign.objects.filter(endpoint=endpoint).count()}, "
+                f"Active campaigns: {SmsKeywordCampaign.objects.filter(endpoint=endpoint, status='active').count()}"
+            )
         
         for campaign in campaigns:
             if campaign.fallback_action_type:
@@ -302,14 +323,14 @@ class SMSMarketingProcessor:
                 )
                 
                 # Update message with campaign/subscriber links
-                message.campaign = campaign
+                message.sms_campaign = campaign  # Field name is sms_campaign, not campaign
                 message.subscriber = subscriber
                 
                 # Mark as completed or failed based on execution result
                 if execution_result.success:
-                    message.processing_status = 'completed'
+                    message.processing_status = 'processed'  # Use 'processed' not 'completed'
                     message.processed_at = timezone.now()
-                    message.save(update_fields=['campaign', 'subscriber', 'processing_status', 'processed_at'])
+                    message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
                 else:
                     message.processing_status = 'failed'
                     message.processed_at = timezone.now()
@@ -328,9 +349,9 @@ class SMSMarketingProcessor:
                 
                 return execution_result.success
         
-        # No fallback configured - mark as completed (no action needed)
+        # No fallback configured - mark as processed (no action needed)
         message.subscriber = subscriber
-        message.processing_status = 'completed'
+        message.processing_status = 'processed'  # Use 'processed' not 'completed'
         message.processed_at = timezone.now()
         message.save(update_fields=['subscriber', 'processing_status', 'processed_at'])
         

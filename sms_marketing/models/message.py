@@ -1,8 +1,7 @@
 from django.db import models
-from external_models.models.communications import ContactEndpoint
-from external_models.models.communications import Conversation, ConversationMessage
-from external_models.models.external_references import Account
+from external_models.models.communications import ContactEndpoint, Conversation, ConversationMessage
 from external_models.models.nurturing_campaigns import LeadNurturingCampaign
+from external_models.models.external_references import Account
 
 
 class SmsMessage(models.Model):

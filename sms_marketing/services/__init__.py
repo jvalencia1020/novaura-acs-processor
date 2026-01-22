@@ -5,6 +5,7 @@ from .router import SMSMarketingRouter, RouteResult
 from .state import SMSMarketingStateManager
 from .actions import SMSMarketingActionExecutor, ExecutionResult
 from .processor import SMSMarketingProcessor
+from .message_sender import SMSMarketingMessageSender
 
 __all__ = [
     'SMSMarketingRouter',
@@ -13,5 +14,6 @@ __all__ = [
     'SMSMarketingActionExecutor',
     'ExecutionResult',
     'SMSMarketingProcessor',
+    'SMSMarketingMessageSender',
 ]
 

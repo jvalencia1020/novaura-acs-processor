@@ -1,8 +1,8 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.conf import settings
+from external_models.models.external_references import Account, Campaign
 from external_models.models.communications import ContactEndpoint
-from external_models.models.external_references import Campaign, Account
 from external_models.models.nurturing_campaigns import LeadNurturingCampaign
 
 
@@ -106,6 +106,28 @@ class SmsKeywordCampaign(models.Model):
         help_text='Opt-in mode for this campaign'
     )
 
+    # Campaign-level default messages
+    welcome_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Default welcome message (used when action_config.welcome_message is not set)'
+    )
+    opt_out_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Default opt-out confirmation message'
+    )
+    help_text = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Default help message (used when action_config.help_text is not set)'
+    )
+    confirmation_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Default confirmation message for double opt-in (used when action_config.confirmation_message is not set)'
+    )
+
     # Fallback configuration
     fallback_action_type = models.CharField(
         max_length=50,
@@ -191,7 +213,7 @@ class SmsKeywordCampaign(models.Model):
             raise ValidationError("Account is required")
         if not self.endpoint:
             raise ValidationError("Endpoint is required")
-        
+
         # Validate follow-up nurturing campaign belongs to same account
         if self.follow_up_nurturing_campaign:
             if self.follow_up_nurturing_campaign.account != self.account:

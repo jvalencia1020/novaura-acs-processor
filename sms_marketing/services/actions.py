@@ -8,9 +8,9 @@ from django.db import transaction
 from external_models.models.messages import MessageTemplate
 from external_models.models.nurturing_campaigns import LeadNurturingCampaign, LeadNurturingParticipant
 from external_models.models.communications import Conversation, ConversationMessage
-from shared_services.message_delivery.message_delivery_service import MessageDeliveryService
 from shared_services.lead_matching_service import LeadMatchingService
 from sms_marketing.models import SmsMessage, SmsSubscriber, SmsKeywordCampaign, SmsKeywordRule
+from sms_marketing.services.message_sender import SMSMarketingMessageSender
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class SMSMarketingActionExecutor:
     """Executes actions for SMS marketing campaigns"""
     
     def __init__(self):
-        self.message_delivery = MessageDeliveryService()
+        self.message_sender = SMSMarketingMessageSender()
         self.lead_matching = LeadMatchingService()
     
     def execute_action(
@@ -140,12 +140,23 @@ class SMSMarketingActionExecutor:
         )
         
         # Send help message
-        self._send_message(subscriber.phone_number, help_text, campaign.endpoint.value)
+        success, sms_message = self.message_sender.send_message(
+            subscriber=subscriber,
+            campaign=campaign,
+            body=help_text,
+            rule=rule,
+            message_type='help'
+        )
         
         return ExecutionResult(
-            True,
-            'message_sent',
-            {'message_type': 'help', 'help_text': help_text}
+            success,
+            'message_sent' if success else 'error',
+            {
+                'message_type': 'help',
+                'help_text': help_text,
+                'sms_message_id': sms_message.id if sms_message else None
+            },
+            error=None if success else 'Failed to send help message'
         )
     
     def _handle_send_template(self, campaign, rule, subscriber, message, action_config):
@@ -168,12 +179,23 @@ class SMSMarketingActionExecutor:
         rendered_content = template.replace_variables(context)
         
         # Send message
-        self._send_message(subscriber.phone_number, rendered_content, campaign.endpoint.value)
+        success, sms_message = self.message_sender.send_message(
+            subscriber=subscriber,
+            campaign=campaign,
+            body=rendered_content,
+            rule=rule,
+            message_type='template'
+        )
         
         return ExecutionResult(
-            True,
-            'message_sent',
-            {'template_id': template_id, 'message_type': 'template'}
+            success,
+            'message_sent' if success else 'error',
+            {
+                'template_id': template_id,
+                'message_type': 'template',
+                'sms_message_id': sms_message.id if sms_message else None
+            },
+            error=None if success else 'Failed to send template message'
         )
     
     def _handle_start_journey(self, campaign, rule, subscriber, message, action_config):
@@ -348,15 +370,34 @@ class SMSMarketingActionExecutor:
         
         return conversation
     
-    def _send_message(self, to_number: str, body: str, from_number: str):
-        """Send SMS message"""
-        success, _ = self.message_delivery.send_message(
-            channel='sms',
-            content=body,
-            service_phone=from_number,
-            to_phone=to_number
+    def _send_message(
+        self,
+        subscriber: SmsSubscriber,
+        campaign: SmsKeywordCampaign,
+        body: str,
+        rule: Optional[SmsKeywordRule] = None,
+        message_type: str = 'regular'
+    ):
+        """
+        Send SMS message using SMSMarketingMessageSender.
+        
+        Args:
+            subscriber: SmsSubscriber to send to
+            campaign: SmsKeywordCampaign this message is for
+            body: Message content
+            rule: Optional SmsKeywordRule that triggered this message
+            message_type: Type of message ('welcome', 'confirmation', 'help', 'opt_out', 'regular')
+            
+        Returns:
+            tuple: (success: bool, sms_message: SmsMessage or None)
+        """
+        return self.message_sender.send_message(
+            subscriber=subscriber,
+            campaign=campaign,
+            body=body,
+            rule=rule,
+            message_type=message_type
         )
-        return success
     
     def _send_welcome_message(self, campaign: SmsKeywordCampaign, subscriber: SmsSubscriber, action_config: Dict):
         """Send welcome message after opt-in"""
@@ -368,10 +409,10 @@ class SMSMarketingActionExecutor:
             self._handle_send_template(campaign, None, subscriber, None, {'template_id': template_id})
         elif welcome_text:
             # Use direct text
-            self._send_message(subscriber.phone_number, welcome_text, campaign.endpoint.value)
+            self._send_message(subscriber, campaign, welcome_text, message_type='welcome')
         elif hasattr(campaign, 'welcome_message') and campaign.welcome_message:
             # Use campaign default
-            self._send_message(subscriber.phone_number, campaign.welcome_message, campaign.endpoint.value)
+            self._send_message(subscriber, campaign, campaign.welcome_message, message_type='welcome')
     
     def _send_confirmation_request(self, campaign: SmsKeywordCampaign, subscriber: SmsSubscriber, action_config: Dict):
         """Send double opt-in confirmation request"""
@@ -379,7 +420,7 @@ class SMSMarketingActionExecutor:
             action_config.get('confirmation_message') or
             "Reply YES to confirm your opt-in."
         )
-        self._send_message(subscriber.phone_number, confirmation_text, campaign.endpoint.value)
+        self._send_message(subscriber, campaign, confirmation_text, message_type='confirmation')
     
     def _send_opt_out_confirmation(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign):
         """Send opt-out confirmation"""
@@ -387,5 +428,5 @@ class SMSMarketingActionExecutor:
             getattr(campaign, 'opt_out_message', None) or
             "You have been unsubscribed. You will no longer receive messages."
         )
-        self._send_message(subscriber.phone_number, opt_out_text, campaign.endpoint.value)
+        self._send_message(subscriber, campaign, opt_out_text, message_type='opt_out')
 

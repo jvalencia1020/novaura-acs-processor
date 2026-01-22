@@ -1,7 +1,8 @@
 from django.db import models
 from django.core.exceptions import ValidationError
-from external_models.models.external_references import Lead
 from external_models.models.communications import ContactEndpoint
+from external_models.models.external_references import Lead
+
 
 class SmsSubscriber(models.Model):
     """
@@ -57,6 +58,14 @@ class SmsSubscriber(models.Model):
         blank=True,
         help_text='When the subscriber opted in'
     )
+    opt_in_message = models.ForeignKey(
+        'SmsMessage',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='opt_in_subscribers',
+        help_text='The message that triggered opt-in'
+    )
 
     # Opt-out tracking
     opt_out_source = models.CharField(
@@ -69,6 +78,14 @@ class SmsSubscriber(models.Model):
         null=True,
         blank=True,
         help_text='When the subscriber opted out'
+    )
+    opt_out_message = models.ForeignKey(
+        'SmsMessage',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='opt_out_subscribers',
+        help_text='The message that triggered opt-out'
     )
 
     # Activity tracking
@@ -103,6 +120,8 @@ class SmsSubscriber(models.Model):
             models.Index(fields=['phone_number']),
             models.Index(fields=['status']),
             models.Index(fields=['lead']),
+            models.Index(fields=['opt_in_message']),
+            models.Index(fields=['opt_out_message']),
         ]
         ordering = ['-created_at']
 
