@@ -41,12 +41,21 @@ class SMSMarketingProcessor:
             if sms_message_id:
                 try:
                     message = SmsMessage.objects.get(id=sms_message_id)
+                    logger.info(
+                        f"Processing SmsMessage {sms_message_id} from database: "
+                        f"from={message.from_number}, to={message.to_number}, "
+                        f"body='{message.body_raw}', normalized='{message.body_normalized}'"
+                    )
                 except SmsMessage.DoesNotExist:
                     logger.error(f"SmsMessage {sms_message_id} not found")
                     return False
             else:
                 # Create message from payload (fallback)
                 message = self._create_message_from_payload(message_data)
+                logger.info(
+                    f"Created SmsMessage {message.id} from payload: "
+                    f"from={message.from_number}, to={message.to_number}, body='{message.body_raw}'"
+                )
             
             # Set processing status to 'processing' when we start
             message.processing_status = 'processing'
@@ -120,12 +129,16 @@ class SMSMarketingProcessor:
                     return True
             
             # Route message
+            keyword_candidate = self._extract_keyword_candidate(message.body_normalized or message.body_raw)
+            logger.info(f"Routing message {message.id} with keyword candidate: '{keyword_candidate}'")
+            
             route_result = self.router.route_inbound(
                 endpoint, message.from_number, message.body_normalized or message.body_raw, subscriber
             )
             
             if not route_result:
                 # No match - handle fallback
+                logger.info(f"No route found for message {message.id}, handling fallback")
                 return self._handle_fallback(endpoint, subscriber, message)
             
             # Handle global commands
@@ -157,6 +170,10 @@ class SMSMarketingProcessor:
                     return True  # Processed, but blocked
             
             # Execute action
+            logger.info(
+                f"Executing action '{route_result.rule.action_type}' for message {message.id} "
+                f"(campaign: {route_result.campaign.id}, rule: {route_result.rule.id})"
+            )
             action_config = route_result.rule.action_config or {}
             execution_result = self.action_executor.execute_action(
                 route_result.campaign,
@@ -165,6 +182,15 @@ class SMSMarketingProcessor:
                 message,
                 action_config
             )
+            
+            logger.info(
+                f"Action execution result for message {message.id}: "
+                f"success={execution_result.success}, event_type={execution_result.event_type}"
+            )
+            if not execution_result.success:
+                logger.warning(
+                    f"Action execution failed for message {message.id}: {execution_result.error}"
+                )
             
             # Log event
             self._log_event(
@@ -177,11 +203,13 @@ class SMSMarketingProcessor:
                 message.processing_status = 'processed'  # Use 'processed' not 'completed'
                 message.processed_at = timezone.now()
                 message.save(update_fields=['processing_status', 'processed_at'])
+                logger.info(f"Message {message.id} marked as processed successfully")
             else:
                 message.processing_status = 'failed'
                 message.processed_at = timezone.now()
                 message.error = execution_result.error or 'Action execution failed'
                 message.save(update_fields=['processing_status', 'processed_at', 'error'])
+                logger.error(f"Message {message.id} marked as failed: {message.error}")
             
             return execution_result.success
             
@@ -308,6 +336,10 @@ class SMSMarketingProcessor:
         
         for campaign in campaigns:
             if campaign.fallback_action_type:
+                logger.info(
+                    f"Executing fallback action '{campaign.fallback_action_type}' for message {message.id} "
+                    f"(campaign: {campaign.id})"
+                )
                 # Execute fallback action
                 # Create a temporary rule for fallback
                 class FallbackRule:
@@ -320,6 +352,11 @@ class SMSMarketingProcessor:
                 
                 execution_result = self.action_executor.execute_action(
                     campaign, fallback_rule, subscriber, message, campaign.fallback_action_config or {}
+                )
+                
+                logger.info(
+                    f"Fallback action result for message {message.id}: "
+                    f"success={execution_result.success}, event_type={execution_result.event_type}"
                 )
                 
                 # Update message with campaign/subscriber links
@@ -335,7 +372,11 @@ class SMSMarketingProcessor:
                     message.processing_status = 'failed'
                     message.processed_at = timezone.now()
                     message.error = execution_result.error or 'Fallback action failed'
-                    message.save(update_fields=['campaign', 'subscriber', 'processing_status', 'processed_at', 'error'])
+                    message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error'])
+                    logger.error(
+                        f"Fallback action failed for message {message.id}, campaign {campaign.id}: "
+                        f"{execution_result.error}"
+                    )
                 
                 # Log event
                 self._log_event(
@@ -350,6 +391,10 @@ class SMSMarketingProcessor:
                 return execution_result.success
         
         # No fallback configured - mark as processed (no action needed)
+        logger.info(
+            f"No fallback action configured for endpoint {endpoint.id}, "
+            f"marking message {message.id} as processed (no action)"
+        )
         message.subscriber = subscriber
         message.processing_status = 'processed'  # Use 'processed' not 'completed'
         message.processed_at = timezone.now()

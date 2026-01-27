@@ -6,15 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared_services/lead_matching_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/lead_matching_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/management/commands/run_sms_marketing_worker.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/management/commands/run_sms_marketing_worker.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/campaign.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/campaign.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/message.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/message.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/rule.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/rule.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/subscriber.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/subscriber.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/actions.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/actions.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/processor.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -36,20 +27,20 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.process_bulk_campaigns.executor": "Run",
-    "Python.process_due_messages.executor": "Run",
-    "Python.run_bulk_campaign_processor.executor": "Run",
-    "Python.sms_marketing_messages.executor": "Debug",
-    "Python.worker.executor": "Run",
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/marketing_tracking/models",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.process_bulk_campaigns.executor&quot;: &quot;Run&quot;,
+    &quot;Python.process_due_messages.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_bulk_campaign_processor.executor&quot;: &quot;Run&quot;,
+    &quot;Python.sms_marketing_messages.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.worker.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/marketing_tracking/models&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/marketing_tracking/models" />
