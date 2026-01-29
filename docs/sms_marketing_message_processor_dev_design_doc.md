@@ -63,14 +63,34 @@ Recommended separation of concerns:
 **Webhook flow:**
 1. Validates Twilio signature
 2. Extracts and normalizes SMS data
-3. Resolves ContactEndpoint
-4. Creates `SmsMessage` (with idempotency check)
-5. Pushes to SQS queue for async processing
-6. Returns 200 OK immediately
+3. Captures query parameters from URL (if provided)
+4. Resolves ContactEndpoint
+5. Creates `SmsMessage` (with idempotency check, including query params)
+6. Pushes to SQS queue for async processing
+7. Returns 200 OK immediately
+
+**Query Parameters (Optional):**
+The webhook supports query parameters in the URL for campaign context and tracking:
+- `account_id`: ID of `crm.Account` (stored on `SmsMessage.account` if resolvable)
+- `sms_campaign_id`: ID of `SmsKeywordCampaign` (stored on `SmsMessage.sms_campaign` if resolvable; can be used as a *hint* to prioritize matching)
+- `nurturing_campaign_id`: ID of `acs.LeadNurturingCampaign` (stored on `SmsMessage.nurturing_campaign` if resolvable)
+- `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`: UTM tracking parameters
+- Any custom parameters for tracking/context
+
+**Example webhook URL:**
+```
+POST /api/communication_processor/webhooks/twilio/sms/marketing/?sms_campaign_id=4&account_id=12&utm_source=email&utm_campaign=summer2024
+```
+
+**Query parameters are:**
+- Stored in `SmsMessage.webhook_query_params` (JSONField)
+- Included in SQS message payload as `webhook_query_params`
+- Extracted for easy access: `sms_campaign_id` and `utm_params` in SQS payload
+- Added to SQS message attributes: `SmsCampaignId` (if `sms_campaign_id` provided)
 
 **SQS Queue Configuration:**
 - Queue URL: `settings.SQS_QUEUE_URLS['sms_marketing']` or fallback to `settings.SQS_QUEUE_URLS['sms']`
-- Message attributes include: `EventType='sms.marketing.inbound'`, `Channel='sms'`, `MessageSid`, etc.
+- Message attributes include: `EventType='sms.marketing.inbound'`, `Channel='sms'`, `MessageSid`, `SmsCampaignId` (if provided), etc.
 
 Inbound payload fields typically needed:
 - `MessageSid` (idempotency key)
@@ -95,6 +115,7 @@ Security:
 - `SmsKeywordCampaign` (config; tied to CRM campaign + endpoint)
 - `SmsKeywordRule` (keyword rules)
 - `SmsCampaignEvent` (audit)
+ - `marketing_tracking.Keyword` (keyword inventory; referenced by `SmsKeywordRule.keyword`)
 
 ### Conversation Integration (Hybrid Approach)
 `SmsMessage` model includes optional foreign keys to support agent replies and conversation threading:
@@ -128,6 +149,7 @@ Security:
   - `account` (CRM Account)
   - `funnel` (optional CRM Funnel)
   - Campaign mappings via `ContactEndpointCampaign` (many-to-many with `crm.Campaign`)
+  - `sms_settings` via `communications.ContactEndpointSmsSettings` (one-to-one; optional)
 
 **Important for opt-in processing:**
 - Endpoint resolution determines which `SmsKeywordCampaign` objects are eligible
@@ -137,6 +159,22 @@ Security:
 If multiple environments/accounts share the same address:
 - Use `ContactEndpoint.platform` and provider `AccountSid` to disambiguate
 - Prefer endpoints with `is_primary=True` when multiple matches exist
+
+### ContactEndpoint SMS Settings (new)
+`communications.ContactEndpointSmsSettings` provides **endpoint-level defaults** for inbound SMS replies when the sender is **not opted in** to any SMS marketing/nurturing context.
+
+Fields:
+- `endpoint` (OneToOne → `communications.ContactEndpoint`, `related_name='sms_settings'`)
+- `not_opted_in_default_reply_message` (Text)
+- `not_opted_in_default_reply_template` (FK → `acs.MessageTemplate`, must have `channel='sms'`)
+
+Recommended processor behavior:
+- If subscriber is **not opted in** (e.g., `unknown`, or opted-in is not established for this endpoint) and the inbound message does not match a valid opt-in path:
+  1. Reply with `endpoint.sms_settings.not_opted_in_default_reply_template` (rendered), else
+  2. Reply with `endpoint.sms_settings.not_opted_in_default_reply_message`, else
+  3. No-op (log event) or fall back to a generic help response
+
+This allows per-endpoint “default responder” behavior without coupling to any single SMS marketing campaign.
 
 ---
 
@@ -377,6 +415,13 @@ for campaign in eligible_campaigns:
 Result:
 - matched `(campaign, rule)` or no match.
 
+### Message linking (important)
+When a `(campaign, rule)` match is found, the processor should persist links on `SmsMessage`:
+- `message.sms_campaign = campaign`
+- `message.rule = rule`
+- `message.subscriber = subscriber`
+This makes it possible to trace (a) which keyword/campaign handled the inbound message, and (b) which specific rule matched.
+
 ### Fallback behavior
 If no rule matches:
 - Use `campaign.fallback_action_type/config` (if defined) OR
@@ -384,6 +429,30 @@ If no rule matches:
 - No-op (log event) + optional generic help prompt
 
 Important: fallback should be **deterministic** and logged.
+
+### Opted-in fallback reply (new)
+If **no keyword rule matches** and the subscriber is already `opted_in`, the processor may optionally reply using the campaign’s opted-in fallback reply:
+
+**Selection (campaign choice):**
+- If a campaign was hinted (e.g. `sms_campaign_id` on the inbound webhook/SQS payload) and is active for the endpoint, prefer that campaign.
+- Otherwise, choose the **highest priority active campaign** for the endpoint (typical deployment has one active campaign per endpoint).
+
+**Reply priority (within the chosen campaign):**
+1. `campaign.opted_in_fallback_template` (render `acs.MessageTemplate` with context + variables)
+2. `campaign.opted_in_fallback_message` (plain text)
+3. `campaign.fallback_action_type` + `campaign.fallback_action_config` (backup)
+
+Recommended template context variables (in addition to existing lead/campaign/system variables):
+- `{{keyword.keyword}}`, `{{keyword.endpoint_value}}`, `{{account.name}}`
+
+### No-match reply decision matrix (summary)
+When no keyword rule matches, choose response based on subscriber state:
+
+- **subscriber.status == `opted_in`**
+  - Use campaign opted-in fallback reply (template/message) → else campaign fallback action
+- **subscriber.status != `opted_in`** (e.g., `unknown`, `pending_opt_in`, `opted_out`)
+  - Prefer endpoint-level SMS settings (`endpoint.sms_settings.not_opted_in_default_reply_*`) when appropriate
+  - Always allow STOP/HELP compliance responses regardless of opt-in state
 
 ---
 
@@ -443,8 +512,17 @@ Recommended action execution pattern:
    - `last_inbound_at=now`
 3. Link lead if phone matches existing lead (normalize and match)
 4. Send confirmation message:
-   - Single opt-in: Welcome message from `action_config.template_id` or campaign default
-   - Double opt-in: "Reply YES to confirm" message
+   - Single opt-in (welcome/initial reply) priority:
+     1. `rule.initial_reply`
+     2. `action_config.template_id` (render `acs.MessageTemplate`, `channel='sms'`)
+     3. `action_config.welcome_message`
+     4. `campaign.welcome_message`
+     5. (none)
+   - Double opt-in (confirmation request) priority:
+     1. `rule.confirmation_message`
+     2. `action_config.confirmation_message`
+     3. `campaign.confirmation_message`
+     4. Default: `"Reply YES to confirm your opt-in."`
 5. Log event: `SmsCampaignEvent(event_type='opt_in', ...)`
 6. If campaign has `follow_up_nurturing_campaign`, enqueue enrollment task
 
@@ -453,6 +531,7 @@ Recommended action execution pattern:
 {
   "template_id": 123,  // Optional: template for welcome message
   "welcome_message": "Thank you for opting in!",  // Optional: direct message text
+  "confirmation_message": "Reply YES to confirm.",  // Optional: confirmation request text (double opt-in)
   "link_lead": true,  // Optional: attempt to link to existing lead
   "create_lead_if_missing": false  // Optional: create lead if not found
 }
@@ -466,8 +545,9 @@ Recommended action execution pattern:
 #### HELP action
 - Send help response from:
   1. `action_config.help_text` (rule-specific)
-  2. `campaign.program.help_text` (if program exists)
-  3. Default help message
+  2. `campaign.help_text` (campaign-level default)
+  3. `campaign.program.help_text` (if program exists)
+  4. Default help message
 - Log event: `SmsCampaignEvent(event_type='message_sent', ...)`
 
 #### SEND_TEMPLATE action
@@ -576,6 +656,13 @@ Implementation options:
 - Or integrate directly with Twilio in a thin adapter.
 
 Do not block webhook on send; always async.
+
+### ContactEndpoint-level SMS reply configuration (new)
+For simple “auto responder” replies that are not campaign-specific (e.g., sender is **not opted in**), prefer using:
+- `communications.ContactEndpointSmsSettings.not_opted_in_default_reply_template` (ACS template, `channel='sms'`) or
+- `communications.ContactEndpointSmsSettings.not_opted_in_default_reply_message` (plain text)
+
+This is configured via the `ContactEndpoint` API payload (`sms_settings` object) and stored on the endpoint, so the processor can respond deterministically without needing to pick a campaign.
 
 ---
 
@@ -747,6 +834,16 @@ The webhook sends messages to SQS with the following structure:
   "channel": "sms",
   "webhook_received_at": "2024-01-15T10:30:05Z",
   "sms_message_id": 789,
+  "webhook_query_params": {
+    "sms_campaign": "4",
+    "utm_source": "email",
+    "utm_campaign": "summer2024"
+  },
+  "sms_campaign_id": 4,
+  "utm_params": {
+    "utm_source": "email",
+    "utm_campaign": "summer2024"
+  },
   "raw_data": {
     "MessageSid": "SM1234567890abcdef",
     "From": "+12035835289",
@@ -764,6 +861,7 @@ The webhook sends messages to SQS with the following structure:
 - `Direction`: "inbound"
 - `AccountId`: Account ID (if available, as string)
 - `SmsMessageId`: Database ID of SmsMessage record (as string)
+- `SmsCampaignId`: SMS campaign ID from query params (if provided, as string)
 
 **Processor Implementation Notes:**
 - Filter SQS messages by `EventType='sms.marketing.inbound'` attribute
@@ -771,6 +869,10 @@ The webhook sends messages to SQS with the following structure:
 - If `sms_message_id` is missing, processor can create `SmsMessage` from payload (fallback)
 - All phone numbers are already normalized to E.164 format
 - `body_normalized` is ready for keyword matching (trimmed, whitespace collapsed)
+- **Query parameters:** Available in `webhook_query_params` dict
+  - Use `sms_campaign_id` (if present) to prioritize specific campaign during keyword matching
+  - Use `utm_params` for tracking/attribution
+  - All query params also stored in `SmsMessage.webhook_query_params` field
 
 ### To be implemented in SMS processor (separate repository)
 
@@ -984,7 +1086,8 @@ def process_inbound_sms_message(message_id):
                 return
         
         # 8. Update message with campaign/rule/subscriber links
-        message.campaign = campaign
+        # NOTE: field name is sms_campaign (not campaign)
+        message.sms_campaign = campaign
         message.rule = rule
         message.subscriber = subscriber
         message.save()
@@ -1244,8 +1347,12 @@ def matches_keyword(rule, keyword_candidate, match_type):
   - Current model: Campaigns are `(account, endpoint)` scoped
   - Confirmed: Endpoint resolution determines eligible campaigns
 - **What is the canonical SMS template model for `SEND_TEMPLATE` actions?**
-  - Need to identify template system/model
-  - Action config expects `template_id` - confirm model/table
+  - **Implemented:** `acs.MessageTemplate` (must have `channel='sms'`)
+  - Action config expects `template_id` (integer)
+  - Template variables supported via `acs.TemplateVariableCategory` + `acs.TemplateVariable`
+    - Format: `{{category.variable}}` (e.g. `{{lead.first_name}}`, `{{campaign.name}}`, `{{system.current_date}}`)
+    - Keyword context variables recommended for SMS marketing templates:
+      - `{{keyword.keyword}}`, `{{keyword.endpoint_value}}`, `{{account.name}}`
 - **Which journey/ACS hooks exist today (what tasks/services to call)?**
   - `START_JOURNEY` action needs: `acs.LeadNurturingCampaign` and `acs.LeadNurturingParticipant` creation
   - `ROUTE_TO_AGENT` action needs: ACS conversation engine integration
@@ -1268,15 +1375,24 @@ def matches_keyword(rule, keyword_candidate, match_type):
 ### Database Models (This Repository) ✅ Ready
 All models are in `sms_marketing` app and ready for use:
 - **`SmsMessage`** - Message log (includes conversation links)
-  - Fields: `id`, `endpoint`, `provider`, `provider_message_id`, `direction`, `status`, `from_number`, `to_number`, `body_raw`, `body_normalized`, `campaign`, `rule`, `subscriber`, `conversation`, `conversation_message`, `error`, timestamps
+  - Fields: `id`, `endpoint`, `provider`, `provider_message_id`, `direction`, `status`, `processing_status`, `from_number`, `to_number`, `body_raw`, `body_normalized`,
+    `raw_data`, `webhook_query_params`,
+    `account`, `sms_campaign`, `nurturing_campaign`, `rule`, `subscriber`,
+    `conversation`, `conversation_message`, `error`, timestamps (`received_at`, `processed_at`, etc.)
   - Unique constraint: `(provider, provider_message_id)` for idempotency
 - **`SmsSubscriber`** - Subscriber state management
   - Fields: `id`, `endpoint`, `phone_number`, `lead`, `status`, `opt_in_*`, `opt_out_*`, `last_inbound_at`, `last_outbound_at`, `metadata`
   - Unique constraint: `(endpoint, phone_number)`
 - **`SmsKeywordCampaign`** - Campaign configuration
-  - Fields: `id`, `account`, `endpoint`, `name`, `status`, `priority`, `opt_in_mode`, `fallback_action_type`, `fallback_action_config`
+  - Fields: `id`, `account`, `endpoint`, `name`, `status`, `priority`, `opt_in_mode`,
+    campaign-level default messages: `welcome_message`, `opt_out_message`, `help_text`, `confirmation_message`,
+    opted-in fallback reply (no keyword match): `opted_in_fallback_message`, `opted_in_fallback_template`,
+    fallback: `fallback_action_type`, `fallback_action_config`
 - **`SmsKeywordRule`** - Keyword rules
-  - Fields: `id`, `campaign`, `keyword` (FK to `marketing_tracking.Keyword`), `match_type`, `priority`, `requires_not_opted_out`, `action_type`, `action_config`, `is_active`
+  - Fields: `id`, `campaign`, `keyword` (FK to `marketing_tracking.Keyword`), `match_type`, `priority`, `requires_not_opted_out`,
+    `action_type`, `action_config`,
+    keyword-level message defaults: `initial_reply`, `confirmation_message`,
+    `is_active`
 - **`SmsCampaignEvent`** - Event logging
   - Fields: `id`, `endpoint`, `campaign`, `rule`, `subscriber`, `message`, `nurturing_campaign`, `nurturing_participant`, `event_type`, `payload`, `created_at`
 

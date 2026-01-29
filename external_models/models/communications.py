@@ -1,6 +1,8 @@
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from external_models.models.external_references import Lead, Account, Campaign, Funnel
+from external_models.models.messages import MessageTemplate
 from external_models.models.reporting import BlandAICall
 
 
@@ -535,3 +537,49 @@ class ContactEndpointCampaign(models.Model):
 
     def __str__(self):
         return f"{self.contact_endpoint.value} -> {self.campaign.name}"
+
+class ContactEndpointSmsSettings(models.Model):
+    """
+    SMS-only settings for a ContactEndpoint.
+
+    This is intentionally separated from ContactEndpoint to keep the core communications
+    model channel-agnostic while still providing endpoint-level defaults for inbound SMS.
+    """
+    endpoint = models.OneToOneField(
+        ContactEndpoint,
+        on_delete=models.CASCADE,
+        related_name='sms_settings',
+        help_text='The contact endpoint these SMS settings apply to',
+    )
+
+    # Default reply when sender is not opted in to SMS marketing/nurturing contexts.
+    not_opted_in_default_reply_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Default reply for inbound SMS when sender is not opted in (plain text)',
+    )
+    not_opted_in_default_reply_template = models.ForeignKey(
+        MessageTemplate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contact_endpoint_not_opted_in_default_sms_settings',
+        help_text="ACS SMS template to render as default reply when sender is not opted in",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'contact_endpoint_sms_settings'
+
+    def __str__(self):
+        return f"SMS settings for {self.endpoint.value}"
+
+    def clean(self):
+        super().clean()
+        if self.not_opted_in_default_reply_template and getattr(self.not_opted_in_default_reply_template, 'channel', None) != 'sms':
+            raise ValidationError({
+                'not_opted_in_default_reply_template': "Template must have channel='sms'"
+            })

@@ -48,6 +48,21 @@ class SmsKeywordRule(models.Model):
         null=True,
         help_text='Configuration for the action'
     )
+    
+    # Keyword-level default messages (used as fallback when action_config doesn't specify)
+    # Priority: action_config.* > rule.* > campaign.* > program.* > default
+    # Note: opt_out_message and help_text are campaign-level only (not keyword-specific)
+    initial_reply = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Initial reply message for this keyword (used when action_config.welcome_message is not set)'
+    )
+    confirmation_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Default confirmation message for double opt-in for this keyword (used when action_config.confirmation_message is not set)'
+    )
+    
     is_active = models.BooleanField(
         default=True,
         help_text='Whether this rule is active'
@@ -79,7 +94,7 @@ class SmsKeywordRule(models.Model):
             raise ValidationError("Keyword is required")
         if not self.action_type:
             raise ValidationError("Action type is required")
-
+        
         # Validate that keyword's endpoint matches campaign's endpoint
         if self.keyword and self.campaign and self.campaign.endpoint:
             if self.keyword.endpoint != self.campaign.endpoint:

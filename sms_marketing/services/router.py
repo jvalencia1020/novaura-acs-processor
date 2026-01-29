@@ -31,7 +31,8 @@ class SMSMarketingRouter:
         endpoint: ContactEndpoint,
         from_number: str,
         body_normalized: str,
-        subscriber: SmsSubscriber
+        subscriber: SmsSubscriber,
+        campaign_hint: Optional[SmsKeywordCampaign] = None
     ) -> Optional[RouteResult]:
         """
         Route inbound message to campaign and rule.
@@ -65,20 +66,31 @@ class SMSMarketingRouter:
             )
         
         # Route to campaign/rule
-        return self._route_to_campaign(endpoint, keyword_candidate, subscriber)
+        return self._route_to_campaign(endpoint, keyword_candidate, subscriber, campaign_hint=campaign_hint)
     
     def _route_to_campaign(
         self,
         endpoint: ContactEndpoint,
         keyword_candidate: str,
-        subscriber: SmsSubscriber
+        subscriber: SmsSubscriber,
+        campaign_hint: Optional[SmsKeywordCampaign] = None
     ) -> Optional[RouteResult]:
         """Route to campaign and rule based on keyword matching"""
         # Get eligible campaigns (active, matching endpoint, ordered by priority)
-        campaigns = SmsKeywordCampaign.objects.filter(
+        campaigns_qs = SmsKeywordCampaign.objects.filter(
             endpoint=endpoint,
             status='active'
         ).order_by('-priority', 'id')
+
+        # If webhook provided a campaign hint (e.g., query param sms_campaign_id), try it first.
+        campaigns = list(campaigns_qs)
+        if campaign_hint and getattr(campaign_hint, 'id', None):
+            try:
+                if campaign_hint.status == 'active' and campaign_hint.endpoint_id == endpoint.id:
+                    campaigns = [campaign_hint] + [c for c in campaigns if c.id != campaign_hint.id]
+            except Exception:
+                # Be defensive: hint should never break routing.
+                pass
         
         for campaign in campaigns:
             # Get active rules for this campaign
@@ -123,8 +135,8 @@ class SMSMarketingRouter:
     
     def _extract_keyword_candidate(self, body_normalized: str) -> str:
         """Extract keyword candidate from normalized body"""
-        # Already normalized, just uppercase for matching
-        return body_normalized.upper().strip()
+        # Be defensive: ensure whitespace is collapsed and casing normalized.
+        return " ".join((body_normalized or "").upper().split())
     
     def _is_global_stop_keyword(self, keyword: str) -> bool:
         """Check if keyword is a global stop command"""

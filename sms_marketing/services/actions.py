@@ -82,7 +82,7 @@ class SMSMarketingActionExecutor:
         
         keyword = rule.keyword.keyword
         result = state_manager.handle_opt_in(
-            subscriber, campaign, rule, campaign.opt_in_mode, keyword
+            subscriber, campaign, rule, campaign.opt_in_mode, keyword, message=message
         )
         
         # Link lead if available
@@ -91,10 +91,10 @@ class SMSMarketingActionExecutor:
         # Send confirmation/welcome message
         if result['confirmed']:
             # Single opt-in: send welcome message
-            self._send_welcome_message(campaign, subscriber, action_config)
+            self._send_welcome_message(campaign, rule, subscriber, action_config)
         else:
             # Double opt-in: send confirmation request
-            self._send_confirmation_request(campaign, subscriber, action_config)
+            self._send_confirmation_request(campaign, rule, subscriber, action_config)
         
         return ExecutionResult(
             True,
@@ -116,7 +116,7 @@ class SMSMarketingActionExecutor:
         state_manager = SMSMarketingStateManager()
         
         keyword = rule.keyword.keyword if rule else 'STOP'
-        result = state_manager.handle_opt_out(subscriber, keyword)
+        result = state_manager.handle_opt_out(subscriber, keyword, message=message)
         
         # Send opt-out confirmation
         self._send_opt_out_confirmation(subscriber, campaign)
@@ -136,11 +136,12 @@ class SMSMarketingActionExecutor:
         help_text = (
             action_config.get('help_text') or
             getattr(campaign, 'help_text', None) or
+            (getattr(campaign, 'program', None).help_text if getattr(campaign, 'program', None) else None) or
             "Reply STOP to opt out. Reply HELP for more information."
         )
-        
-        # Send help message
-        success, sms_message = self.message_sender.send_message(
+
+        # Send help message (apply variable replacement for plain text too)
+        success, sms_message = self._send_message(
             subscriber=subscriber,
             campaign=campaign,
             body=help_text,
@@ -373,7 +374,7 @@ class SMSMarketingActionExecutor:
     def _send_message(
         self,
         subscriber: SmsSubscriber,
-        campaign: SmsKeywordCampaign,
+        campaign: Optional[SmsKeywordCampaign],
         body: str,
         rule: Optional[SmsKeywordRule] = None,
         message_type: str = 'regular'
@@ -391,36 +392,94 @@ class SMSMarketingActionExecutor:
         Returns:
             tuple: (success: bool, sms_message: SmsMessage or None)
         """
+        rendered_body = self._render_plain_text(body, subscriber=subscriber, campaign=campaign, rule=rule)
+
         return self.message_sender.send_message(
             subscriber=subscriber,
             campaign=campaign,
-            body=body,
+            body=rendered_body,
             rule=rule,
             message_type=message_type
         )
+
+    def _render_plain_text(
+        self,
+        body: Optional[str],
+        subscriber: SmsSubscriber,
+        campaign: Optional[SmsKeywordCampaign] = None,
+        rule: Optional[SmsKeywordRule] = None,
+        extra_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Apply TemplateVariable/TemplateVariableCategory replacement to plain text bodies.
+        Uses MessageTemplate.replace_variables() so templates and plain text share the same variable system.
+        """
+        if not body:
+            return body or ""
+
+        # Keep context consistent with SEND_TEMPLATE and processor fallbacks.
+        endpoint = None
+        try:
+            endpoint = campaign.endpoint if campaign else getattr(subscriber, 'endpoint', None)
+        except Exception:
+            endpoint = getattr(subscriber, 'endpoint', None)
+
+        keyword_text = None
+        try:
+            keyword_text = rule.keyword.keyword if rule and getattr(rule, 'keyword', None) else None
+        except Exception:
+            keyword_text = None
+
+        context: Dict[str, Any] = {
+            'lead': getattr(subscriber, 'lead', None),
+            'subscriber': subscriber,
+            'campaign': campaign,
+            'endpoint': endpoint,
+            'account': getattr(campaign, 'account', None) if campaign else getattr(endpoint, 'account', None),
+            'keyword': {
+                'keyword': keyword_text,
+                'endpoint_value': getattr(endpoint, 'value', None) if endpoint else None,
+            },
+        }
+        if extra_context:
+            context.update(extra_context)
+
+        try:
+            # Instantiate unsaved template wrapper and reuse the same replacement engine.
+            return MessageTemplate(content=body).replace_variables(context)
+        except Exception as e:
+            logger.warning(f"Variable replacement failed; sending raw body. error={e}")
+            return body
     
-    def _send_welcome_message(self, campaign: SmsKeywordCampaign, subscriber: SmsSubscriber, action_config: Dict):
+    def _send_welcome_message(self, campaign: SmsKeywordCampaign, rule: Optional[SmsKeywordRule], subscriber: SmsSubscriber, action_config: Dict):
         """Send welcome message after opt-in"""
         template_id = action_config.get('template_id')
         welcome_text = action_config.get('welcome_message')
+        rule_initial_reply = getattr(rule, 'initial_reply', None) if rule else None
         
-        if template_id:
+        # Priority (per design doc):
+        # 1) rule.initial_reply -> 2) action_config.template_id -> 3) action_config.welcome_message -> 4) campaign.welcome_message
+        if rule_initial_reply:
+            self._send_message(subscriber, campaign, rule_initial_reply, rule=rule, message_type='welcome')
+        elif template_id:
             # Use template
             self._handle_send_template(campaign, None, subscriber, None, {'template_id': template_id})
         elif welcome_text:
             # Use direct text
-            self._send_message(subscriber, campaign, welcome_text, message_type='welcome')
+            self._send_message(subscriber, campaign, welcome_text, rule=rule, message_type='welcome')
         elif hasattr(campaign, 'welcome_message') and campaign.welcome_message:
             # Use campaign default
-            self._send_message(subscriber, campaign, campaign.welcome_message, message_type='welcome')
+            self._send_message(subscriber, campaign, campaign.welcome_message, rule=rule, message_type='welcome')
     
-    def _send_confirmation_request(self, campaign: SmsKeywordCampaign, subscriber: SmsSubscriber, action_config: Dict):
+    def _send_confirmation_request(self, campaign: SmsKeywordCampaign, rule: Optional[SmsKeywordRule], subscriber: SmsSubscriber, action_config: Dict):
         """Send double opt-in confirmation request"""
         confirmation_text = (
+            (getattr(rule, 'confirmation_message', None) if rule else None) or
             action_config.get('confirmation_message') or
+            getattr(campaign, 'confirmation_message', None) or
             "Reply YES to confirm your opt-in."
         )
-        self._send_message(subscriber, campaign, confirmation_text, message_type='confirmation')
+        self._send_message(subscriber, campaign, confirmation_text, rule=rule, message_type='confirmation')
     
     def _send_opt_out_confirmation(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign):
         """Send opt-out confirmation"""

@@ -1,10 +1,11 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.conf import settings
+
 from external_models.models.external_references import Account, Campaign
 from external_models.models.communications import ContactEndpoint
+from external_models.models.messages import MessageTemplate
 from external_models.models.nurturing_campaigns import LeadNurturingCampaign
-
 
 class SmsKeywordCampaignCrmCampaign(models.Model):
     """
@@ -128,6 +129,23 @@ class SmsKeywordCampaign(models.Model):
         help_text='Default confirmation message for double opt-in (used when action_config.confirmation_message is not set)'
     )
 
+    # Opted-in fallback reply (used when NO keyword rule matches)
+    # Priority recommendation for processor:
+    # 1) opted_in_fallback_template (rendered) -> 2) opted_in_fallback_message -> 3) fallback_action_*
+    opted_in_fallback_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Reply message for opted-in users when no keyword rule matches (fallback for opted-in users)'
+    )
+    opted_in_fallback_template = models.ForeignKey(
+        MessageTemplate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sms_marketing_opted_in_fallback_campaigns',
+        help_text='ACS SMS template to render as reply for opted-in users when no keyword rule matches'
+    )
+
     # Fallback configuration
     fallback_action_type = models.CharField(
         max_length=50,
@@ -213,7 +231,7 @@ class SmsKeywordCampaign(models.Model):
             raise ValidationError("Account is required")
         if not self.endpoint:
             raise ValidationError("Endpoint is required")
-
+        
         # Validate follow-up nurturing campaign belongs to same account
         if self.follow_up_nurturing_campaign:
             if self.follow_up_nurturing_campaign.account != self.account:

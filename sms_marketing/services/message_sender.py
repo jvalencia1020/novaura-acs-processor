@@ -31,7 +31,7 @@ class SMSMarketingMessageSender:
     def send_message(
         self,
         subscriber: SmsSubscriber,
-        campaign: SmsKeywordCampaign,
+        campaign: Optional[SmsKeywordCampaign],
         body: str,
         rule: Optional[SmsKeywordRule] = None,
         message_type: str = 'regular'
@@ -41,7 +41,7 @@ class SMSMarketingMessageSender:
         
         Args:
             subscriber: SmsSubscriber to send to
-            campaign: SmsKeywordCampaign this message is for
+            campaign: Optional SmsKeywordCampaign this message is for
             body: Message content
             rule: Optional SmsKeywordRule that triggered this message
             message_type: Type of message ('welcome', 'confirmation', 'help', 'opt_out', 'regular')
@@ -91,10 +91,10 @@ class SMSMarketingMessageSender:
                 to_number=formatted_to,
                 body_raw=body,
                 body_normalized=body.upper().strip(),  # Normalize for consistency
-                sms_campaign=campaign,  # Field name is sms_campaign
+                sms_campaign=campaign,  # Field name is sms_campaign (nullable)
                 rule=rule,
                 subscriber=subscriber,
-                account=campaign.account if hasattr(campaign, 'account') and campaign.account else None,
+                account=campaign.account if campaign and hasattr(campaign, 'account') and campaign.account else None,
                 sent_at=timezone.now(),
                 # Provider metadata
                 account_sid=twilio_message.account_sid,
@@ -137,10 +137,10 @@ class SMSMarketingMessageSender:
                     to_number=formatted_to if 'formatted_to' in locals() else to_number,
                     body_raw=body,
                     body_normalized=body.upper().strip(),
-                    sms_campaign=campaign,  # Field name is sms_campaign
+                    sms_campaign=campaign,  # Field name is sms_campaign (nullable)
                     rule=rule,
                     subscriber=subscriber,
-                    account=campaign.account if hasattr(campaign, 'account') and campaign.account else None,
+                    account=campaign.account if campaign and hasattr(campaign, 'account') and campaign.account else None,
                     error=f"Twilio error: {str(e)}",
                     raw_data={
                         'message_type': message_type,

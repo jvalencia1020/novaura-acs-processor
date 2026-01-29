@@ -5,7 +5,7 @@ import logging
 from typing import Optional, Dict
 from django.utils import timezone
 from django.db import transaction
-from sms_marketing.models import SmsSubscriber, SmsKeywordCampaign
+from sms_marketing.models import SmsSubscriber, SmsKeywordCampaign, SmsMessage
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,8 @@ class SMSMarketingStateManager:
         campaign: SmsKeywordCampaign,
         rule,
         opt_in_mode: str,  # 'single', 'double', 'none'
-        keyword: str
+        keyword: str,
+        message: Optional[SmsMessage] = None
     ) -> Dict:
         """
         Handle opt-in state transition.
@@ -56,6 +57,8 @@ class SMSMarketingStateManager:
             subscriber.opt_in_at = now
             subscriber.opt_in_source = 'keyword'
             subscriber.opt_in_keyword = keyword
+            if message:
+                subscriber.opt_in_message = message
             subscriber.last_inbound_at = now
             subscriber.save()
             return {'status': 'opted_in', 'confirmed': True}
@@ -66,6 +69,8 @@ class SMSMarketingStateManager:
             subscriber.opt_in_source = 'keyword'
             subscriber.opt_in_keyword = keyword
             subscriber.opt_in_at = None  # Not confirmed yet
+            if message:
+                subscriber.opt_in_message = message
             subscriber.last_inbound_at = now
             subscriber.save()
             return {'status': 'pending_opt_in', 'confirmed': False}
@@ -86,13 +91,22 @@ class SMSMarketingStateManager:
         return True
     
     @transaction.atomic
-    def handle_opt_out(self, subscriber: SmsSubscriber, keyword: str) -> Dict:
+    def handle_opt_out(self, subscriber: SmsSubscriber, keyword: str, message: Optional[SmsMessage] = None) -> Dict:
         """Handle opt-out state transition"""
         was_opted_in = subscriber.status == 'opted_in'
+
+        # If user opts out while pending, clear pending opt-in fields (doc behavior).
+        if subscriber.status == 'pending_opt_in':
+            subscriber.opt_in_source = None
+            subscriber.opt_in_keyword = None
+            subscriber.opt_in_at = None
+            subscriber.opt_in_message = None
         
         subscriber.status = 'opted_out'
         subscriber.opt_out_at = timezone.now()
         subscriber.opt_out_source = 'keyword'
+        if message:
+            subscriber.opt_out_message = message
         subscriber.last_inbound_at = timezone.now()
         subscriber.save()
         

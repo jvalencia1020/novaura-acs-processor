@@ -87,10 +87,20 @@ class SMSMarketingProcessor:
                 # We need to find the campaign that triggered the pending state
                 # For now, check all active campaigns for this endpoint
                 # Use direct model manager query (same pattern as router.py) for consistency
-                campaigns = SmsKeywordCampaign.objects.filter(
+                campaigns_qs = SmsKeywordCampaign.objects.filter(
                     endpoint=endpoint,
                     status='active'
                 ).order_by('-priority', 'id')
+
+                campaigns = list(campaigns_qs)
+                # If webhook provided a campaign hint (sms_campaign_id), try it first.
+                if message.sms_campaign_id and message.sms_campaign:
+                    try:
+                        hinted = message.sms_campaign
+                        if hinted.status == 'active' and hinted.endpoint_id == endpoint.id:
+                            campaigns = [hinted] + [c for c in campaigns if c.id != hinted.id]
+                    except Exception:
+                        pass
 
                 for campaign in campaigns:
                     if self.state_manager.is_confirmation_keyword(keyword_candidate, campaign):
@@ -103,7 +113,7 @@ class SMSMarketingProcessor:
                         ).first()
                         if rule:
                             action_config = rule.action_config or {}
-                            self.action_executor._send_welcome_message(campaign, subscriber, action_config)
+                            self.action_executor._send_welcome_message(campaign, rule, subscriber, action_config)
                         
                         # Update message with campaign/rule/subscriber links
                         message.sms_campaign = campaign  # Field name is sms_campaign
@@ -116,7 +126,12 @@ class SMSMarketingProcessor:
                         # Log event
                         self._log_event(
                             endpoint, campaign, rule, subscriber, message,
-                            'opt_in', {'confirmed': True, 'opt_in_keyword': subscriber.opt_in_keyword}
+                            'opt_in',
+                            {
+                                'confirmed': True,
+                                'opt_in_keyword': subscriber.opt_in_keyword,
+                                'rule_id': rule.id if rule else None,
+                            }
                         )
                         return True
                 else:
@@ -131,9 +146,14 @@ class SMSMarketingProcessor:
             # Route message
             keyword_candidate = self._extract_keyword_candidate(message.body_normalized or message.body_raw)
             logger.info(f"Routing message {message.id} with keyword candidate: '{keyword_candidate}'")
-            
+
+            campaign_hint = message.sms_campaign if message.sms_campaign_id else None
             route_result = self.router.route_inbound(
-                endpoint, message.from_number, message.body_normalized or message.body_raw, subscriber
+                endpoint,
+                message.from_number,
+                message.body_normalized or message.body_raw,
+                subscriber,
+                campaign_hint=campaign_hint,
             )
             
             if not route_result:
@@ -153,6 +173,22 @@ class SMSMarketingProcessor:
             message.rule = route_result.rule
             message.subscriber = subscriber
             message.save()
+
+            # Audit: keyword matched a rule (doc event type)
+            self._log_event(
+                endpoint,
+                route_result.campaign,
+                route_result.rule,
+                subscriber,
+                message,
+                'keyword_matched',
+                {
+                    'keyword_candidate': keyword_candidate,
+                    'keyword_matched': route_result.keyword_matched,
+                    'match_type': route_result.match_type,
+                    'selected_rule_id': route_result.rule.id if route_result.rule else None,
+                }
+            )
             
             # Check subscriber status restrictions
             if subscriber.status == 'opted_out' and route_result.rule.requires_not_opted_out:
@@ -165,7 +201,12 @@ class SMSMarketingProcessor:
                     
                     self._log_event(
                         endpoint, route_result.campaign, route_result.rule, subscriber, message,
-                        'error', {'reason': 'subscriber_opted_out'}
+                        'error',
+                        {
+                            'reason': 'subscriber_opted_out',
+                            'keyword_candidate': keyword_candidate,
+                            'selected_rule_id': route_result.rule.id if route_result.rule else None,
+                        }
                     )
                     return True  # Processed, but blocked
             
@@ -192,10 +233,35 @@ class SMSMarketingProcessor:
                     f"Action execution failed for message {message.id}: {execution_result.error}"
                 )
             
+            # Audit: rule was triggered (doc event type)
+            self._log_event(
+                endpoint,
+                route_result.campaign,
+                route_result.rule,
+                subscriber,
+                message,
+                'rule_triggered',
+                {
+                    'keyword_candidate': keyword_candidate,
+                    'selected_rule_id': route_result.rule.id if route_result.rule else None,
+                    'rule_id': route_result.rule.id if route_result.rule else None,
+                    'action_type': route_result.rule.action_type if route_result.rule else None,
+                    'success': execution_result.success,
+                    'execution_event_type': execution_result.event_type,
+                    'execution_payload': execution_result.payload,
+                    'error': execution_result.error,
+                }
+            )
+
             # Log event
             self._log_event(
                 endpoint, route_result.campaign, route_result.rule, subscriber, message,
-                execution_result.event_type, execution_result.payload
+                execution_result.event_type,
+                {
+                    **(execution_result.payload or {}),
+                    'keyword_candidate': keyword_candidate,
+                    'selected_rule_id': route_result.rule.id if route_result.rule else None,
+                }
             )
             
             # Mark as processed if successful
@@ -262,33 +328,48 @@ class SMSMarketingProcessor:
         """Extract keyword candidate from message body"""
         if not body:
             return ""
-        return body.upper().strip()
+        # Normalize casing and collapse whitespace per design doc.
+        return " ".join(body.upper().split())
     
     def _handle_global_opt_out(self, subscriber: SmsSubscriber, message: SmsMessage, endpoint: ContactEndpoint) -> bool:
         """Handle global STOP command"""
         from sms_marketing.services.state import SMSMarketingStateManager
         state_manager = SMSMarketingStateManager()
-        
+
+        campaign_context = self._get_campaign_context_for_global_command(endpoint, message)
+
         keyword = self._extract_keyword_candidate(message.body_normalized or message.body_raw)
-        result = state_manager.handle_opt_out(subscriber, keyword)
+        result = state_manager.handle_opt_out(subscriber, keyword, message=message)
         
         # Update message with subscriber link
         message.subscriber = subscriber
+        if campaign_context and not message.sms_campaign_id:
+            message.sms_campaign = campaign_context
         message.processing_status = 'processed'  # Use 'processed' not 'completed'
         message.processed_at = timezone.now()
-        message.save(update_fields=['subscriber', 'processing_status', 'processed_at'])
+        message.save(update_fields=['subscriber', 'sms_campaign', 'processing_status', 'processed_at'])
         
         # Send opt-out confirmation
-        opt_out_text = "You have been unsubscribed. You will no longer receive messages."
-        self.action_executor._send_message(subscriber.phone_number, opt_out_text, endpoint.value)
+        opt_out_text = (
+            getattr(campaign_context, 'opt_out_message', None)
+            if campaign_context else None
+        ) or "You have been unsubscribed. You will no longer receive messages."
+        self.action_executor._send_message(
+            subscriber=subscriber,
+            campaign=campaign_context,
+            body=opt_out_text,
+            rule=None,
+            message_type='opt_out',
+        )
         
         # Log event
         self._log_event(
-            endpoint, None, None, subscriber, message,
+            endpoint, campaign_context, None, subscriber, message,
             'opt_out', {
                 'opt_out_source': 'keyword',
                 'opt_out_keyword': keyword,
-                'was_opted_in': result['was_opted_in']
+                'was_opted_in': result['was_opted_in'],
+                'keyword_candidate': keyword,
             }
         )
         
@@ -296,116 +377,325 @@ class SMSMarketingProcessor:
     
     def _handle_global_help(self, subscriber: SmsSubscriber, message: SmsMessage, endpoint: ContactEndpoint) -> bool:
         """Handle global HELP command"""
-        help_text = "Reply STOP to opt out. Reply HELP for more information."
-        self.action_executor._send_message(subscriber.phone_number, help_text, endpoint.value)
+        campaign_context = self._get_campaign_context_for_global_command(endpoint, message)
+        help_text = (
+            getattr(campaign_context, 'help_text', None)
+            if campaign_context else None
+        ) or (
+            (campaign_context.program.help_text if campaign_context and campaign_context.program else None)
+        ) or "Reply STOP to opt out. Reply HELP for more information."
+
+        self.action_executor._send_message(
+            subscriber=subscriber,
+            campaign=campaign_context,
+            body=help_text,
+            rule=None,
+            message_type='help',
+        )
         
-        # Update message with subscriber link and mark as completed
+        # Update message with subscriber link
         message.subscriber = subscriber
-        message.processing_status = 'completed'
+        if campaign_context and not message.sms_campaign_id:
+            message.sms_campaign = campaign_context
+        message.processing_status = 'processed'
         message.processed_at = timezone.now()
-        message.save(update_fields=['subscriber', 'processing_status', 'processed_at'])
+        message.save(update_fields=['subscriber', 'sms_campaign', 'processing_status', 'processed_at'])
         
         # Log event
         self._log_event(
-            endpoint, None, None, subscriber, message,
-            'message_sent', {'message_type': 'help', 'help_text': help_text}
+            endpoint, campaign_context, None, subscriber, message,
+            'message_sent',
+            {
+                'message_type': 'help',
+                'help_text': help_text,
+                'keyword_candidate': self._extract_keyword_candidate(message.body_normalized or message.body_raw),
+            }
         )
         
         return True
+
+    def _get_campaign_context_for_global_command(
+        self,
+        endpoint: ContactEndpoint,
+        message: SmsMessage
+    ) -> Optional[SmsKeywordCampaign]:
+        """
+        Best-effort campaign context for global commands (HELP/STOP).
+        If webhook provided sms_campaign_id, use it; otherwise use highest-priority active campaign for endpoint.
+        """
+        try:
+            if message.sms_campaign_id and message.sms_campaign:
+                hinted = message.sms_campaign
+                if hinted.status == 'active' and hinted.endpoint_id == endpoint.id:
+                    return hinted
+        except Exception:
+            pass
+
+        return SmsKeywordCampaign.objects.filter(
+            endpoint=endpoint,
+            status='active'
+        ).order_by('-priority', 'id').first()
     
     def _handle_fallback(self, endpoint: ContactEndpoint, subscriber: SmsSubscriber, message: SmsMessage) -> bool:
         """Handle fallback when no rule matches"""
-        # Get campaigns for this endpoint
-        # Use direct model manager query (same pattern as router.py) for consistency
-        campaigns = SmsKeywordCampaign.objects.filter(
-            endpoint=endpoint,
-            status='active'
-        ).order_by('-priority', 'id')
-        
-        logger.debug(
-            f"Fallback: Found {campaigns.count()} active campaigns for endpoint {endpoint.id} "
-            f"(endpoint value: {endpoint.value})"
-        )
-        
-        if campaigns.count() == 0:
-            logger.warning(
-                f"No active campaigns found for endpoint {endpoint.id}. "
-                f"Total campaigns for endpoint: {SmsKeywordCampaign.objects.filter(endpoint=endpoint).count()}, "
-                f"Active campaigns: {SmsKeywordCampaign.objects.filter(endpoint=endpoint, status='active').count()}"
-            )
-        
-        for campaign in campaigns:
-            if campaign.fallback_action_type:
-                logger.info(
-                    f"Executing fallback action '{campaign.fallback_action_type}' for message {message.id} "
-                    f"(campaign: {campaign.id})"
+        # Always link subscriber for auditability.
+        message.subscriber = subscriber
+
+        # Non-opted-in handling (endpoint-level SMS settings).
+        # If sender is not opted in and no valid opt-in/keyword path applies (we're in fallback),
+        # reply using endpoint.sms_settings (template -> message -> else no-op).
+        if subscriber.status != 'opted_in':
+            sms_settings = getattr(endpoint, 'sms_settings', None)
+            reply_body = None
+            used_template = False
+            template_id = None
+
+            if sms_settings:
+                template = getattr(sms_settings, 'not_opted_in_default_reply_template', None)
+                if template and getattr(template, 'channel', None) == 'sms':
+                    try:
+                        context = {
+                            'lead': getattr(subscriber, 'lead', None),
+                            'subscriber': subscriber,
+                            'endpoint': endpoint,
+                            'account': getattr(endpoint, 'account', None),
+                            'campaign': None,
+                            'keyword': {
+                                'keyword': None,
+                                'endpoint_value': getattr(endpoint, 'value', None),
+                            },
+                        }
+                        reply_body = template.replace_variables(context)
+                        used_template = True
+                        template_id = getattr(template, 'id', None)
+                    except Exception as e:
+                        logger.warning(f"Failed to render endpoint not-opted-in reply template for endpoint {endpoint.id}: {e}")
+                        reply_body = None
+                        used_template = False
+                        template_id = None
+
+                if not reply_body:
+                    reply_body = getattr(sms_settings, 'not_opted_in_default_reply_message', None)
+
+            if reply_body:
+                # Apply variable replacement for plain text replies too.
+                success, outbound_sms = self.action_executor._send_message(
+                    subscriber=subscriber,
+                    campaign=None,
+                    body=reply_body,
+                    rule=None,
+                    message_type='not_opted_in_default_reply',
                 )
-                # Execute fallback action
-                # Create a temporary rule for fallback
-                class FallbackRule:
-                    def __init__(self, action_type, action_config):
-                        self.action_type = action_type
-                        self.action_config = action_config or {}
-                        self.keyword = type('Keyword', (), {'keyword': ''})()
-                
-                fallback_rule = FallbackRule(campaign.fallback_action_type, campaign.fallback_action_config)
-                
-                execution_result = self.action_executor.execute_action(
-                    campaign, fallback_rule, subscriber, message, campaign.fallback_action_config or {}
-                )
-                
-                logger.info(
-                    f"Fallback action result for message {message.id}: "
-                    f"success={execution_result.success}, event_type={execution_result.event_type}"
-                )
-                
-                # Update message with campaign/subscriber links
-                message.sms_campaign = campaign  # Field name is sms_campaign, not campaign
-                message.subscriber = subscriber
-                
-                # Mark as completed or failed based on execution result
-                if execution_result.success:
-                    message.processing_status = 'processed'  # Use 'processed' not 'completed'
+
+                if success:
+                    message.processing_status = 'processed'
                     message.processed_at = timezone.now()
-                    message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
+                    message.save(update_fields=['subscriber', 'processing_status', 'processed_at'])
                 else:
                     message.processing_status = 'failed'
                     message.processed_at = timezone.now()
-                    message.error = execution_result.error or 'Fallback action failed'
-                    message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error'])
-                    logger.error(
-                        f"Fallback action failed for message {message.id}, campaign {campaign.id}: "
-                        f"{execution_result.error}"
-                    )
-                
-                # Log event
+                    message.error = 'Not-opted-in default reply failed'
+                    message.save(update_fields=['subscriber', 'processing_status', 'processed_at', 'error'])
+
                 self._log_event(
-                    endpoint, campaign, None, subscriber, message,
-                    execution_result.event_type, {
-                        **execution_result.payload,
+                    endpoint,
+                    None,
+                    None,
+                    subscriber,
+                    message,
+                    'message_sent' if success else 'error',
+                    {
                         'fallback': True,
-                        'reason': 'no_keyword_match'
+                        'fallback_type': 'endpoint_not_opted_in_reply',
+                        'reason': 'no_keyword_match',
+                        'message_type': 'not_opted_in_default_reply',
+                        'used_template': used_template,
+                        'template_id': template_id,
+                        'sms_message_id': getattr(outbound_sms, 'id', None) if outbound_sms else None,
                     }
                 )
-                
-                return execution_result.success
-        
+                return success
+
+            # No endpoint-level reply configured: no-op (or generic help later if desired).
+            message.processing_status = 'processed'
+            message.processed_at = timezone.now()
+            message.save(update_fields=['subscriber', 'processing_status', 'processed_at'])
+            self._log_event(
+                endpoint, None, None, subscriber, message,
+                'message_received', {'fallback': False, 'reason': 'no_keyword_match', 'not_opted_in': True}
+            )
+            return True
+
+        # Opted-in handling (campaign-level opted-in fallback -> campaign fallback action).
+        # Deterministic campaign selection:
+        # - if webhook hinted a campaign (message.sms_campaign_id), prefer it (if active for endpoint)
+        # - else choose highest priority active campaign for endpoint
+        campaign = None
+        try:
+            if message.sms_campaign_id and message.sms_campaign:
+                hinted = message.sms_campaign
+                if hinted.status == 'active' and hinted.endpoint_id == endpoint.id:
+                    campaign = hinted
+        except Exception:
+            pass
+
+        if not campaign:
+            campaign = SmsKeywordCampaign.objects.filter(
+                endpoint=endpoint,
+                status='active'
+            ).order_by('-priority', 'id').first()
+
+        if not campaign:
+            logger.info(
+                f"No active campaigns found for endpoint {endpoint.id}; "
+                f"marking message {message.id} as processed (no action)"
+            )
+            message.processing_status = 'processed'
+            message.processed_at = timezone.now()
+            message.save(update_fields=['subscriber', 'processing_status', 'processed_at'])
+            self._log_event(
+                endpoint, None, None, subscriber, message,
+                'message_received', {'fallback': False, 'reason': 'no_keyword_match'}
+            )
+            return True
+
+        # Link message to chosen campaign for auditability.
+        message.sms_campaign = campaign
+
+        rendered_body = None
+        used_template = False
+        template_id = None
+
+        try:
+            template = getattr(campaign, 'opted_in_fallback_template', None)
+            if template:
+                context = {
+                    'lead': getattr(subscriber, 'lead', None),
+                    'campaign': campaign,
+                    'subscriber': subscriber,
+                    # Optional keyword context for templates (doc suggestion)
+                    'keyword': {
+                        'keyword': None,
+                        'endpoint_value': getattr(endpoint, 'value', None),
+                    },
+                    'account': getattr(campaign, 'account', None),
+                }
+                rendered_body = template.replace_variables(context)
+                used_template = True
+                template_id = getattr(template, 'id', None)
+        except Exception as e:
+            logger.warning(f"Failed to render opted-in fallback template for campaign {campaign.id}: {e}")
+            rendered_body = None
+            used_template = False
+            template_id = None
+
+        if not rendered_body:
+            rendered_body = getattr(campaign, 'opted_in_fallback_message', None)
+
+        if rendered_body:
+            # Apply variable replacement for plain text replies too (templates are already rendered).
+            success, outbound_sms = self.action_executor._send_message(
+                subscriber=subscriber,
+                campaign=campaign,
+                body=rendered_body,
+                rule=None,
+                message_type='opted_in_fallback',
+            )
+
+            if success:
+                message.processing_status = 'processed'
+                message.processed_at = timezone.now()
+                message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
+            else:
+                message.processing_status = 'failed'
+                message.processed_at = timezone.now()
+                message.error = 'Opted-in fallback reply failed'
+                message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error'])
+
+            self._log_event(
+                endpoint,
+                campaign,
+                None,
+                subscriber,
+                message,
+                'message_sent' if success else 'error',
+                {
+                    'fallback': True,
+                    'fallback_type': 'opted_in_reply',
+                    'reason': 'no_keyword_match',
+                    'message_type': 'opted_in_fallback',
+                    'used_template': used_template,
+                    'template_id': template_id,
+                    'sms_message_id': getattr(outbound_sms, 'id', None) if outbound_sms else None,
+                }
+            )
+            return success
+
+        # If no opted-in fallback reply was used, fall back to campaign fallback action (if any)
+        if campaign.fallback_action_type:
+            logger.info(
+                f"Executing fallback action '{campaign.fallback_action_type}' for message {message.id} "
+                f"(campaign: {campaign.id})"
+            )
+
+            # Create a temporary rule-like object for fallback execution
+            class FallbackRule:
+                def __init__(self, action_type, action_config):
+                    self.action_type = action_type
+                    self.action_config = action_config or {}
+                    self.keyword = type('Keyword', (), {'keyword': ''})()
+
+            fallback_rule = FallbackRule(campaign.fallback_action_type, campaign.fallback_action_config)
+            execution_result = self.action_executor.execute_action(
+                campaign, fallback_rule, subscriber, message, campaign.fallback_action_config or {}
+            )
+
+            logger.info(
+                f"Fallback action result for message {message.id}: "
+                f"success={execution_result.success}, event_type={execution_result.event_type}"
+            )
+
+            if execution_result.success:
+                message.processing_status = 'processed'
+                message.processed_at = timezone.now()
+                message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
+            else:
+                message.processing_status = 'failed'
+                message.processed_at = timezone.now()
+                message.error = execution_result.error or 'Fallback action failed'
+                message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error'])
+                logger.error(
+                    f"Fallback action failed for message {message.id}, campaign {campaign.id}: "
+                    f"{execution_result.error}"
+                )
+
+            self._log_event(
+                endpoint,
+                campaign,
+                None,
+                subscriber,
+                message,
+                execution_result.event_type,
+                {
+                    **(execution_result.payload or {}),
+                    'fallback': True,
+                    'reason': 'no_keyword_match',
+                }
+            )
+            return execution_result.success
+
         # No fallback configured - mark as processed (no action needed)
         logger.info(
-            f"No fallback action configured for endpoint {endpoint.id}, "
+            f"No fallback configured for endpoint {endpoint.id}, campaign {campaign.id}; "
             f"marking message {message.id} as processed (no action)"
         )
-        message.subscriber = subscriber
-        message.processing_status = 'processed'  # Use 'processed' not 'completed'
+        message.processing_status = 'processed'
         message.processed_at = timezone.now()
-        message.save(update_fields=['subscriber', 'processing_status', 'processed_at'])
-        
-        # Log event
+        message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
         self._log_event(
-            endpoint, None, None, subscriber, message,
+            endpoint, campaign, None, subscriber, message,
             'message_received', {'fallback': False, 'reason': 'no_keyword_match'}
         )
-        
         return True
     
     def _log_event(
@@ -431,7 +721,9 @@ class SMSMarketingProcessor:
                     **payload,
                     'provider': message.provider if message else None,
                     'provider_message_id': message.provider_message_id if message else None,
+                    'raw_body': message.body_raw if message else None,
                     'normalized_body': message.body_normalized if message else None,
+                    'webhook_query_params': message.webhook_query_params if message else None,
                     'subscriber_status_before': getattr(subscriber, '_status_before', None),
                     'subscriber_status_after': subscriber.status if subscriber else None,
                 }
