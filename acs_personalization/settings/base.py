@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'journey_processor',
     'bulkcampaign_processor',
     'communication_processor',
+    'link_tracking',
     'sms_marketing',
     'marketing_tracking',
 

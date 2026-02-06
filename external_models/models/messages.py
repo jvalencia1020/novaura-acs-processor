@@ -187,8 +187,11 @@ class MessageTemplate(models.Model):
                     elif var.name == 'current_time':
                         value = timezone.now().strftime('%I:%M %p')
                 else:
-                    # Get value from context using the model and field information
-                    model_data = context.get(category, {})
+                    # Get value from context using the model and field information.
+                    # Normalize 'Link' -> 'link' so context from callers using capital L still works.
+                    model_data = context.get(category) or (
+                        context.get('Link') if category == 'link' else context.get('link') if category == 'Link' else None
+                    ) or {}
                     if isinstance(model_data, dict):
                         value = model_data.get(var.name, '')
                     else:

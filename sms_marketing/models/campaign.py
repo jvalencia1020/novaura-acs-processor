@@ -10,6 +10,7 @@ from external_models.models.nurturing_campaigns import LeadNurturingCampaign
 class SmsKeywordCampaignCrmCampaign(models.Model):
     """
     Intermediate model for many-to-many relationship between SMS campaigns and CRM campaigns.
+    Use start_date/end_date to record when each mapping was in effect; is_active marks current vs historical.
     """
     sms_campaign = models.ForeignKey(
         'SmsKeywordCampaign',
@@ -24,6 +25,20 @@ class SmsKeywordCampaignCrmCampaign(models.Model):
     is_primary = models.BooleanField(
         default=False,
         help_text='Indicates if this is the primary CRM campaign for the SMS campaign'
+    )
+    start_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text='When this mapping became effective. Null means from creation.',
+    )
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text='When this mapping ended. Null means still current.',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Explicitly mark this mapping as active (in use) or inactive (historical).',
     )
     assigned_at = models.DateTimeField(auto_now_add=True)
     assigned_by = models.ForeignKey(
@@ -42,9 +57,15 @@ class SmsKeywordCampaignCrmCampaign(models.Model):
             models.Index(fields=['sms_campaign', 'crm_campaign']),
             models.Index(fields=['is_primary']),
         ]
+        ordering = ['-start_date', '-assigned_at']
 
     def __str__(self):
         return f"{self.sms_campaign.name} → {self.crm_campaign.name}"
+
+    @property
+    def is_current(self):
+        """Alias for is_active (for API backward compatibility)."""
+        return self.is_active
 
 
 class SmsKeywordCampaign(models.Model):
@@ -241,14 +262,13 @@ class SmsKeywordCampaign(models.Model):
 
     def get_active_rules_count(self):
         """Get count of active rules"""
-        return self.rules.filter(is_active=True).count()
+        return self.rules.filter(is_active=True, ended_at__isnull=True).count()
 
     def get_rules_count(self):
         """Get total count of rules"""
-        return self.rules.count()
+        return self.rules.filter(ended_at__isnull=True).count()
 
     def get_primary_crm_campaign(self):
         """Get the primary CRM campaign if set"""
         relation = self.crm_campaign_relations.filter(is_primary=True).first()
         return relation.crm_campaign if relation else None
-

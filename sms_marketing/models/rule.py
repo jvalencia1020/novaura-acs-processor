@@ -1,5 +1,7 @@
 from django.db import models
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from marketing_tracking.models import Keyword
 
 
@@ -48,7 +50,17 @@ class SmsKeywordRule(models.Model):
         null=True,
         help_text='Configuration for the action'
     )
-    
+
+    # Short link to substitute into outbound messages (SMS processor uses this)
+    short_link = models.ForeignKey(
+        'link_tracking.Link',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sms_keyword_rules',
+        help_text='Short link to insert into messages when sending for this rule',
+    )
+
     # Keyword-level default messages (used as fallback when action_config doesn't specify)
     # Priority: action_config.* > rule.* > campaign.* > program.* > default
     # Note: opt_out_message and help_text are campaign-level only (not keyword-specific)
@@ -67,17 +79,64 @@ class SmsKeywordRule(models.Model):
         default=True,
         help_text='Whether this rule is active'
     )
+
+    # Audit / lifecycle fields (soft end instead of hard delete)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_sms_keyword_rules',
+        help_text='User who created this rule (if created via API/admin)'
+    )
+    ended_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When this rule was ended (soft-deleted/unassigned/reassigned)'
+    )
+    ended_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ended_sms_keyword_rules',
+        help_text='User who ended this rule (if ended via API/admin)'
+    )
+    end_reason = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text='Reason this rule ended (e.g., deleted, reassigned)'
+    )
+    replaced_by = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='replaced_rules',
+        help_text='If ended due to reassignment, points to the replacement rule'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         managed = False
         db_table = 'sms_keyword_rule'
-        unique_together = ('campaign', 'keyword')
+        constraints = [
+            # Allow historical (ended) rules to coexist, but enforce only one current rule
+            # per campaign+keyword.
+            models.UniqueConstraint(
+                fields=['campaign', 'keyword'],
+                condition=Q(ended_at__isnull=True),
+                name='uniq_active_sms_keyword_rule_campaign_keyword'
+            )
+        ]
         indexes = [
             models.Index(fields=['campaign', 'is_active']),
             models.Index(fields=['campaign', 'keyword']),
             models.Index(fields=['keyword', 'match_type']),
+            models.Index(fields=['ended_at'], name='sms_keyword_rule_ended_at_idx'),
         ]
         ordering = ['-priority', 'keyword__keyword']
 
@@ -102,4 +161,8 @@ class SmsKeywordRule(models.Model):
                     f"Keyword endpoint '{self.keyword.endpoint.value if self.keyword.endpoint else 'N/A'}' does not match "
                     f"campaign endpoint '{self.campaign.endpoint.value}'"
                 )
+
+    @property
+    def is_ended(self) -> bool:
+        return self.ended_at is not None
 

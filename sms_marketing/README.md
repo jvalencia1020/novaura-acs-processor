@@ -86,6 +86,13 @@ Supported action types:
 - `ROUTE_TO_AGENT`: Forward to ACS conversation engine
 - `COMPOSITE`: Execute multiple actions in sequence/parallel
 
+### Short links and template variables
+
+When a keyword rule has a **short link** assigned (`SmsKeywordRule.short_link`), outbound message bodies can use the ACS template variable **`{{link.short_link}}`** (from the "link" category). It is replaced with the campaign short URL including a `?sms_msg_id=<message_id>` query parameter so each recipient gets a unique, trackable link. The link-runtime service forwards `sms_msg_id` onto the redirect URL and into click events for full user/responder journey tracking.
+
+- Seed the link category and variable once: `python manage.py seed_link_template_variable` (from the `external_models` app).
+- Use `{{link.short_link}}` in welcome messages, templates, or any body that is sent when the rule has a short link. Other variables (e.g. `{{lead.first_name}}`) are replaced in the same pass.
+
 ## Integration Points
 
 ### Lead Matching

@@ -381,43 +381,41 @@ class SMSMarketingActionExecutor:
     ):
         """
         Send SMS message using SMSMarketingMessageSender.
-        
-        Args:
-            subscriber: SmsSubscriber to send to
-            campaign: SmsKeywordCampaign this message is for
-            body: Message content
-            rule: Optional SmsKeywordRule that triggered this message
-            message_type: Type of message ('welcome', 'confirmation', 'help', 'opt_out', 'regular')
-            
+
+        When rule has short_link set, passes raw body and context to the sender so it can
+        create SmsMessage first, inject {{link.short_link}}, and run replace_variables there.
+        Otherwise renders body with _render_plain_text and sends (no context).
+
         Returns:
             tuple: (success: bool, sms_message: SmsMessage or None)
         """
+        if rule and rule.short_link:
+            context = self._build_message_context(subscriber=subscriber, campaign=campaign, rule=rule)
+            return self.message_sender.send_message(
+                subscriber=subscriber,
+                campaign=campaign,
+                body=body,
+                rule=rule,
+                message_type=message_type,
+                context=context,
+            )
         rendered_body = self._render_plain_text(body, subscriber=subscriber, campaign=campaign, rule=rule)
-
         return self.message_sender.send_message(
             subscriber=subscriber,
             campaign=campaign,
             body=rendered_body,
             rule=rule,
-            message_type=message_type
+            message_type=message_type,
         )
 
-    def _render_plain_text(
+    def _build_message_context(
         self,
-        body: Optional[str],
         subscriber: SmsSubscriber,
         campaign: Optional[SmsKeywordCampaign] = None,
         rule: Optional[SmsKeywordRule] = None,
         extra_context: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Apply TemplateVariable/TemplateVariableCategory replacement to plain text bodies.
-        Uses MessageTemplate.replace_variables() so templates and plain text share the same variable system.
-        """
-        if not body:
-            return body or ""
-
-        # Keep context consistent with SEND_TEMPLATE and processor fallbacks.
+    ) -> Dict[str, Any]:
+        """Build context dict for variable replacement (lead, campaign, keyword, etc.)."""
         endpoint = None
         try:
             endpoint = campaign.endpoint if campaign else getattr(subscriber, 'endpoint', None)
@@ -441,11 +439,38 @@ class SMSMarketingActionExecutor:
                 'endpoint_value': getattr(endpoint, 'value', None) if endpoint else None,
             },
         }
+        # Include link for {{link.short_link}} when rule has a short link (base URL from domain + slug_canonical).
+        # rule.short_link is the FK (Link instance); Link.short_link property returns get_full_url().
+        if rule and rule.short_link:
+            context['link'] = rule.short_link
         if extra_context:
             context.update(extra_context)
+        # Normalize: use lowercase 'link' so variable replacement is consistent with other categories
+        if 'Link' in context:
+            if 'link' not in context:
+                context['link'] = context['Link']
+            del context['Link']
+        return context
 
+    def _render_plain_text(
+        self,
+        body: Optional[str],
+        subscriber: SmsSubscriber,
+        campaign: Optional[SmsKeywordCampaign] = None,
+        rule: Optional[SmsKeywordRule] = None,
+        extra_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Apply TemplateVariable/TemplateVariableCategory replacement to plain text bodies.
+        Uses MessageTemplate.replace_variables() so templates and plain text share the same variable system.
+        """
+        if not body:
+            return body or ""
+
+        context = self._build_message_context(
+            subscriber=subscriber, campaign=campaign, rule=rule, extra_context=extra_context
+        )
         try:
-            # Instantiate unsaved template wrapper and reuse the same replacement engine.
             return MessageTemplate(content=body).replace_variables(context)
         except Exception as e:
             logger.warning(f"Variable replacement failed; sending raw body. error={e}")

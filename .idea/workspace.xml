@@ -5,19 +5,21 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/novaura-acs-processor.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/novaura-acs-processor.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/link_tracking/models/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/link_tracking/models/audit.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/link_tracking/models/campaign.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/link_tracking/models/campaign_mapping.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/link_tracking/models/compliance.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/link_tracking/models/domain.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/link_tracking/models/link.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/communications.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/communications.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/base.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/messages.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/messages.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sms_marketing/models/campaign.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/campaign.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sms_marketing/models/rule.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/rule.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sms_marketing/services/actions.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/actions.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sms_marketing/services/message_sender.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/message_sender.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/state.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/state.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/tests.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing_message_processor_dev_design_doc.md" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -44,7 +46,7 @@
     "Python.process_bulk_campaigns.executor": "Run",
     "Python.process_due_messages.executor": "Run",
     "Python.run_bulk_campaign_processor.executor": "Run",
-    "Python.sms_marketing_messages.executor": "Run",
+    "Python.sms_marketing_messages.executor": "Debug",
     "Python.worker.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
@@ -53,7 +55,7 @@
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "ai.playground.ignore.import.keys.banner.in.settings": "true",
     "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/jhonvalencia/Documents/Projects/novaura-acs-processor",
+    "last_opened_file_path": "/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/link_tracking",
     "nodejs_package_manager_path": "npm",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
     "vue.rearranger.settings.migration": "true"
@@ -61,6 +63,7 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/link_tracking" />
       <recent name="$PROJECT_DIR$/marketing_tracking/models" />
       <recent name="$PROJECT_DIR$/marketing_tracking" />
       <recent name="$PROJECT_DIR$/sms_marketing" />
@@ -269,7 +272,8 @@
       <option name="presentableId" value="Default" />
       <updated>1747881033164</updated>
       <workItem from="1769529366056" duration="7584000" />
-      <workItem from="1769543550330" duration="8391000" />
+      <workItem from="1769543550330" duration="8995000" />
+      <workItem from="1770347273616" duration="3672000" />
     </task>
     <servers />
   </component>
@@ -420,9 +424,19 @@
           <option name="timeStamp" value="99" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/external_models/models/messages.py</url>
+          <line>200</line>
+          <option name="timeStamp" value="105" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/sms_marketing/services/actions.py</url>
-          <line>461</line>
-          <option name="timeStamp" value="101" />
+          <line>473</line>
+          <option name="timeStamp" value="106" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/external_models/models/messages.py</url>
+          <line>190</line>
+          <option name="timeStamp" value="107" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
@@ -435,6 +449,6 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/novaura_acs_processor$process_bulk_campaigns.coverage" NAME="process_bulk_campaigns Coverage Results" MODIFIED="1769535565212" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
-    <SUITE FILE_PATH="coverage/novaura_acs_processor$sms_marketing_messages.coverage" NAME="sms_marketing_messages Coverage Results" MODIFIED="1769730208998" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/novaura_acs_processor$sms_marketing_messages.coverage" NAME="sms_marketing_messages Coverage Results" MODIFIED="1770351302763" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>
