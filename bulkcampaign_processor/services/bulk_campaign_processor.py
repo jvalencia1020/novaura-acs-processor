@@ -35,7 +35,9 @@ from shared_services.message_validation_service import MessageValidationService
 from shared_services.time_calculation_service import TimeCalculationService
 from shared_services.message_group_service import MessageGroupService
 
+from link_tracking.services.runtime_publisher import ensure_link_published
 from bulkcampaign_processor.utils.timezone_utils import convert_from_utc
+from bulkcampaign_processor.utils.short_link import build_bulk_short_url
 
 logger = logging.getLogger(__name__)
 
@@ -856,8 +858,31 @@ class BulkCampaignProcessor:
                     logger.debug(f"Cannot send blast message {message.id} - send time not reached yet")
                     return False
 
-            # Get message content
-            processed_content = message.get_message_content()
+            # Get message content (with optional short link for drip/reminder steps)
+            extra_context = None
+            if campaign.campaign_type == 'drip' and message.drip_message_step and getattr(message.drip_message_step, 'short_link_id', None):
+                link = message.drip_message_step.short_link
+                acs_context = {
+                    'lead': message.participant.lead,
+                    'campaign': campaign,
+                }
+                if not ensure_link_published(link, acs_context=acs_context):
+                    logger.error("Aborting send: failed to publish short link for drip step %s", message.drip_message_step.id)
+                    return False
+                resolved_url = build_bulk_short_url(link, drip_step_id=message.drip_message_step.id)
+                extra_context = {'link': {'short_link': resolved_url}}
+            elif campaign.campaign_type == 'reminder' and message.reminder_message and getattr(message.reminder_message, 'short_link_id', None):
+                link = message.reminder_message.short_link
+                acs_context = {
+                    'lead': message.participant.lead,
+                    'campaign': campaign,
+                }
+                if not ensure_link_published(link, acs_context=acs_context):
+                    logger.error("Aborting send: failed to publish short link for reminder message %s", message.reminder_message.id)
+                    return False
+                resolved_url = build_bulk_short_url(link, reminder_message_id=message.reminder_message.id)
+                extra_context = {'link': {'short_link': resolved_url}}
+            processed_content = message.get_message_content(extra_context=extra_context)
 
             # Get service phone number for SMS/Voice using modular channel configuration
             service_phone = None

@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from .nurturing_campaign_base import CampaignScheduleBase, CampaignProgressBase
 from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
+from link_tracking.models import Link
 
 
 class ReminderCampaignSchedule(CampaignScheduleBase):
@@ -158,6 +159,15 @@ class ReminderMessage(models.Model):
     sms_config = models.ForeignKey(SMSConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='reminder_messages')
     voice_config = models.ForeignKey(VoiceConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='reminder_messages')
     chat_config = models.ForeignKey(ChatConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='reminder_messages')
+
+    short_link = models.ForeignKey(
+        Link,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reminder_messages',
+        help_text='Optional short link to include in this message',
+    )
 
     class Meta:
         managed = False

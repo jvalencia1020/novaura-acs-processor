@@ -4,6 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from .nurturing_campaign_base import CampaignScheduleBase, CampaignProgressBase
 from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
+from link_tracking.models import Link
 
 
 class DripCampaignMessageStep(models.Model):
@@ -34,6 +35,16 @@ class DripCampaignMessageStep(models.Model):
     sms_config = models.OneToOneField(SMSConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     voice_config = models.OneToOneField(VoiceConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     chat_config = models.OneToOneField(ChatConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+
+    short_link = models.ForeignKey(
+        Link,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='drip_message_steps',
+        help_text='Optional short link to include in this step\'s message',
+    )
+
 
     class Meta:
         managed = False

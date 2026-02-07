@@ -11,6 +11,8 @@ from .drip_campaigns import DripCampaignProgress
 from .reminder_campaigns import ReminderCampaignProgress
 from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
 from bulkcampaign_processor.utils.variable_replacement import replace_variables
+# SmsMessage, SmsSubscriber: use string refs below to avoid circular import with sms_marketing.models.campaign
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -664,8 +666,10 @@ class BulkCampaignMessage(models.Model):
 
         return self.campaign.can_send_message(self.participant)
 
-    def get_message_content(self):
-        """Get the message content based on campaign type and message step with enhanced variable replacement"""
+    def get_message_content(self, extra_context=None):
+        """Get the message content based on campaign type and message step with enhanced variable replacement.
+        extra_context: optional dict merged into context before variable replacement (e.g. {'link': {'short_link': resolved_url}}).
+        """
         # Prepare context for variable replacement
         lead = self.participant.lead
         campaign = self.campaign
@@ -692,6 +696,9 @@ class BulkCampaignMessage(models.Model):
                 'description': getattr(campaign, 'description', '') or '',
             }
         }
+        if extra_context:
+            for key, value in extra_context.items():
+                context[key] = value
 
         # Handle opt-out messages
         if self.message_type == 'opt_out_notice':
@@ -776,17 +783,17 @@ class BulkCampaignMessage(models.Model):
                 logger.error(f"No content found in campaign {campaign.id}")
                 return ""
         
-        # Apply variable replacement
+        # Apply variable replacement (context may include extra_context e.g. link.short_link)
         if content:
             processed_content = replace_variables(content, context)
-            
+
             # Check if variables were replaced
             if "{{" in processed_content and "}}" in processed_content:
                 # Try one more time with a more aggressive approach
                 processed_content = replace_variables(processed_content, context)
-            
+
             return processed_content
-        
+
         return ""
 
     @classmethod
@@ -953,6 +960,25 @@ class LeadNurturingParticipant(models.Model):
         help_text="Indicates whether the opt-out confirmation message has been sent"
     )
     metadata = models.JSONField(blank=True, null=True)
+
+    # Attribution: link back to the SMS that triggered enrollment (e.g. START_JOURNEY)
+    # String refs to avoid circular import with sms_marketing.models.campaign
+    originating_sms_message = models.ForeignKey(
+        'sms_marketing.SmsMessage',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='nurturing_participants_enrolled',
+        help_text='Inbound SMS that triggered enrollment in this nurturing campaign',
+    )
+    originating_subscriber = models.ForeignKey(
+        'sms_marketing.SmsSubscriber',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='nurturing_participations',
+        help_text='SMS subscriber who triggered enrollment (e.g. via START_JOURNEY)',
+    )
 
     class Meta:
         managed = False

@@ -14,13 +14,19 @@ class SMSMarketingStateManager:
     """Manages subscriber state transitions"""
     
     @transaction.atomic
-    def get_or_create_subscriber(self, endpoint, phone_number: str):
-        """Get or create subscriber for endpoint + phone"""
+    def get_or_create_subscriber(self, endpoint, phone_number: str, sms_campaign_id: Optional[int] = None):
+        """Get or create subscriber for endpoint + phone. Optionally set sms_campaign when known at creation/resolution time."""
+        defaults = {'status': 'unknown'}
+        if sms_campaign_id is not None:
+            defaults['sms_campaign_id'] = sms_campaign_id
         subscriber, created = SmsSubscriber.objects.get_or_create(
             endpoint=endpoint,
             phone_number=phone_number,
-            defaults={'status': 'unknown'}
+            defaults=defaults
         )
+        if not created and sms_campaign_id is not None and subscriber.sms_campaign_id is None:
+            subscriber.sms_campaign_id = sms_campaign_id
+            subscriber.save(update_fields=['sms_campaign_id'])
         return subscriber, created
     
     @transaction.atomic

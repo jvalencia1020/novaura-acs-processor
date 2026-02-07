@@ -70,9 +70,9 @@ class SMSMarketingProcessor:
                 message.save(update_fields=['processing_status', 'error'])
                 return False
             
-            # Get or create subscriber
+            # Get or create subscriber (pass campaign when webhook provides it)
             subscriber, _ = self.state_manager.get_or_create_subscriber(
-                endpoint, message.from_number
+                endpoint, message.from_number, sms_campaign_id=message.sms_campaign_id
             )
             
             # Update last inbound timestamp
@@ -106,13 +106,18 @@ class SMSMarketingProcessor:
                     if self.state_manager.is_confirmation_keyword(keyword_candidate, campaign):
                         # Complete double opt-in
                         self.state_manager.handle_double_opt_in_confirmation(subscriber, campaign)
-                        # Send welcome message
-                        # Find the rule that triggered the opt-in
+                        # Find the rule that triggered the opt-in (for action_config and welcome message)
                         rule = campaign.rules.filter(
                             keyword__keyword__iexact=subscriber.opt_in_keyword
                         ).first()
+                        action_config = (rule.action_config or {}) if rule else {}
+                        # Link/create lead so we can enroll in follow-up nurturing campaign
+                        self.action_executor._link_or_create_lead(subscriber, campaign, action_config)
+                        # Enroll in follow-up nurturing campaign (drip/reminder/blast) if linked
+                        self.action_executor._enroll_in_follow_up_nurturing_campaign_if_applicable(
+                            campaign, subscriber, message
+                        )
                         if rule:
-                            action_config = rule.action_config or {}
                             self.action_executor._send_welcome_message(campaign, rule, subscriber, action_config)
                         
                         # Update message with campaign/rule/subscriber links
@@ -122,6 +127,9 @@ class SMSMarketingProcessor:
                         message.processing_status = 'processed'  # Use 'processed' not 'completed'
                         message.processed_at = timezone.now()
                         message.save(update_fields=['sms_campaign', 'rule', 'subscriber', 'processing_status', 'processed_at'])
+                        if subscriber.sms_campaign_id != campaign.id:
+                            subscriber.sms_campaign = campaign
+                            subscriber.save(update_fields=['sms_campaign_id'])
                         
                         # Log event
                         self._log_event(
@@ -169,10 +177,14 @@ class SMSMarketingProcessor:
                 return self._handle_global_help(subscriber, message, endpoint)
             
             # Update message with campaign/rule/subscriber links
-            message.sms_campaign = route_result.campaign  # Field name is sms_campaign
+            campaign = route_result.campaign
+            message.sms_campaign = campaign  # Field name is sms_campaign
             message.rule = route_result.rule
             message.subscriber = subscriber
             message.save()
+            if subscriber.sms_campaign_id != campaign.id:
+                subscriber.sms_campaign = campaign
+                subscriber.save(update_fields=['sms_campaign_id'])
 
             # Audit: keyword matched a rule (doc event type)
             self._log_event(
@@ -345,6 +357,9 @@ class SMSMarketingProcessor:
         message.subscriber = subscriber
         if campaign_context and not message.sms_campaign_id:
             message.sms_campaign = campaign_context
+            if subscriber.sms_campaign_id != campaign_context.id:
+                subscriber.sms_campaign = campaign_context
+                subscriber.save(update_fields=['sms_campaign_id'])
         message.processing_status = 'processed'  # Use 'processed' not 'completed'
         message.processed_at = timezone.now()
         message.save(update_fields=['subscriber', 'sms_campaign', 'processing_status', 'processed_at'])
@@ -397,6 +412,9 @@ class SMSMarketingProcessor:
         message.subscriber = subscriber
         if campaign_context and not message.sms_campaign_id:
             message.sms_campaign = campaign_context
+            if subscriber.sms_campaign_id != campaign_context.id:
+                subscriber.sms_campaign = campaign_context
+                subscriber.save(update_fields=['sms_campaign_id'])
         message.processing_status = 'processed'
         message.processed_at = timezone.now()
         message.save(update_fields=['subscriber', 'sms_campaign', 'processing_status', 'processed_at'])
@@ -561,6 +579,9 @@ class SMSMarketingProcessor:
 
         # Link message to chosen campaign for auditability.
         message.sms_campaign = campaign
+        if subscriber.sms_campaign_id != campaign.id:
+            subscriber.sms_campaign = campaign
+            subscriber.save(update_fields=['sms_campaign_id'])
 
         rendered_body = None
         used_template = False

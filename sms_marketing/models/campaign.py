@@ -5,7 +5,6 @@ from django.conf import settings
 from external_models.models.external_references import Account, Campaign
 from external_models.models.communications import ContactEndpoint
 from external_models.models.messages import MessageTemplate
-from external_models.models.nurturing_campaigns import LeadNurturingCampaign
 
 class SmsKeywordCampaignCrmCampaign(models.Model):
     """
@@ -202,9 +201,9 @@ class SmsKeywordCampaign(models.Model):
         help_text='Timezone for this campaign'
     )
 
-    # Follow-up nurturing campaign
+    # Follow-up nurturing campaign (string ref to avoid circular import with external_models.models.nurturing_campaigns)
     follow_up_nurturing_campaign = models.ForeignKey(
-        LeadNurturingCampaign,
+        'external_models.LeadNurturingCampaign',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

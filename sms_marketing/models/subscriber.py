@@ -2,6 +2,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from external_models.models.communications import ContactEndpoint
 from external_models.models.external_references import Lead
+from sms_marketing.models import SmsKeywordCampaign
 
 
 class SmsSubscriber(models.Model):
@@ -32,6 +33,14 @@ class SmsSubscriber(models.Model):
         blank=True,
         related_name='sms_subscribers',
         help_text='Linked lead for nurturing campaign enrollment'
+    )
+    sms_campaign = models.ForeignKey(
+        SmsKeywordCampaign,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='subscribers',
+        help_text='SMS marketing campaign this subscriber is associated with (e.g. campaign they opted into)',
     )
     status = models.CharField(
         max_length=20,
@@ -120,6 +129,7 @@ class SmsSubscriber(models.Model):
             models.Index(fields=['phone_number']),
             models.Index(fields=['status']),
             models.Index(fields=['lead']),
+            models.Index(fields=['sms_campaign']),
             models.Index(fields=['opt_in_message']),
             models.Index(fields=['opt_out_message']),
         ]

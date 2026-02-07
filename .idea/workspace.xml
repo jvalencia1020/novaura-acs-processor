@@ -6,6 +6,18 @@
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/drip_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/drip_campaigns.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/journeys.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/journeys.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/reminder_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/reminder_campaigns.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/link_tracking/models/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/models/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/link_tracking/models/campaign_mapping.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/models/campaign_mapping.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/models/campaign.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/campaign.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/models/subscriber.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/subscriber.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/actions.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/actions.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/state.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/state.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -32,7 +44,7 @@
     "Python.process_bulk_campaigns.executor": "Run",
     "Python.process_due_messages.executor": "Run",
     "Python.run_bulk_campaign_processor.executor": "Run",
-    "Python.sms_marketing_messages.executor": "Debug",
+    "Python.sms_marketing_messages.executor": "Run",
     "Python.worker.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
@@ -260,6 +272,8 @@
       <workItem from="1769529366056" duration="7584000" />
       <workItem from="1769543550330" duration="8995000" />
       <workItem from="1770347273616" duration="4572000" />
+      <workItem from="1770413124519" duration="8731000" />
+      <workItem from="1770487734418" duration="3786000" />
     </task>
     <servers />
   </component>
@@ -271,12 +285,12 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/external_models/models/nurturing_campaigns.py</url>
-          <line>976</line>
+          <line>977</line>
           <option name="timeStamp" value="19" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>93</line>
+          <line>95</line>
           <option name="timeStamp" value="35" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -286,7 +300,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>161</line>
+          <line>163</line>
           <option name="timeStamp" value="37" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -336,7 +350,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>420</line>
+          <line>422</line>
           <option name="timeStamp" value="66" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -361,7 +375,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>918</line>
+          <line>943</line>
           <option name="timeStamp" value="74" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -376,7 +390,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>838</line>
+          <line>840</line>
           <option name="timeStamp" value="82" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -396,12 +410,12 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>852</line>
+          <line>854</line>
           <option name="timeStamp" value="89" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/sms_marketing/services/processor.py</url>
-          <line>372</line>
+          <line>377</line>
           <option name="timeStamp" value="97" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -410,19 +424,29 @@
           <option name="timeStamp" value="99" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/external_models/models/messages.py</url>
-          <line>200</line>
-          <option name="timeStamp" value="105" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/sms_marketing/services/actions.py</url>
-          <line>473</line>
+          <line>520</line>
           <option name="timeStamp" value="106" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/link_tracking/services/runtime_publisher.py</url>
+          <line>147</line>
+          <option name="timeStamp" value="109" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/external_models/models/messages.py</url>
-          <line>190</line>
-          <option name="timeStamp" value="107" />
+          <line>200</line>
+          <option name="timeStamp" value="110" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/link_tracking/services/runtime_publisher.py</url>
+          <line>212</line>
+          <option name="timeStamp" value="112" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/link_tracking/services/runtime_publisher.py</url>
+          <line>208</line>
+          <option name="timeStamp" value="113" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
@@ -435,6 +459,6 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/novaura_acs_processor$process_bulk_campaigns.coverage" NAME="process_bulk_campaigns Coverage Results" MODIFIED="1769535565212" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
-    <SUITE FILE_PATH="coverage/novaura_acs_processor$sms_marketing_messages.coverage" NAME="sms_marketing_messages Coverage Results" MODIFIED="1770351302763" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/novaura_acs_processor$sms_marketing_messages.coverage" NAME="sms_marketing_messages Coverage Results" MODIFIED="1770493380453" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>
