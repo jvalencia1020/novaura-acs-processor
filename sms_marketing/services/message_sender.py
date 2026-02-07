@@ -192,8 +192,17 @@ class SMSMarketingMessageSender:
             logger.error(f"Invalid phone number format: to={to_number}, from={from_number}")
             return False, None
 
-        # Publish link to DynamoDB so the link runtime can redirect when the user clicks
-        if not ensure_link_published(rule.short_link):
+        # Publish link to DynamoDB so the link runtime can redirect when the user clicks.
+        # Pass keyword/short_code for ${...} UTM substitution and context for {{...}} ACS template variables.
+        utm_context = {
+            'keyword': getattr(rule.keyword, 'keyword', '') if getattr(rule, 'keyword', None) else '',
+            'short_code': getattr(endpoint, 'value', '') or '',
+        }
+        if not ensure_link_published(
+            rule.short_link,
+            utm_context=utm_context,
+            acs_context=context,
+        ):
             logger.error(
                 "Aborting send: failed to publish short link to DynamoDB (link_id=%s, domain=%s, slug=%s)",
                 rule.short_link.id,
