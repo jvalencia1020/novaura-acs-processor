@@ -247,3 +247,9 @@ TWILIO_AUTH_TOKEN=os.getenv('TWILIO_AUTH_TOKEN')
 AUTH_USER_MODEL = 'external_models.User'
 
 BLAND_AI_API_KEY=os.getenv('BLAND_AI_API_KEY')
+
+# Link runtime (short-link redirect) – DynamoDB table used by link runtime service.
+# ACS processor publishes links here when sending messages with short links; runtime reads by PK/SK.
+# Must match the runtime service's DYNAMODB_TABLE_NAME (e.g. link-runtime-production).
+LINK_RUNTIME_TABLE_NAME = os.getenv('LINK_RUNTIME_TABLE_NAME', 'link-runtime-production')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')

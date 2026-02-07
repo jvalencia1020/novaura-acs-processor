@@ -5,21 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/link_tracking/models/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/link_tracking/models/audit.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/link_tracking/models/campaign.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/link_tracking/models/campaign_mapping.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/link_tracking/models/compliance.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/link_tracking/models/domain.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/link_tracking/models/link.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/base.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/messages.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/messages.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/campaign.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/campaign.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/rule.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/rule.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/actions.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/actions.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/message_sender.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/message_sender.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -273,7 +259,7 @@
       <updated>1747881033164</updated>
       <workItem from="1769529366056" duration="7584000" />
       <workItem from="1769543550330" duration="8995000" />
-      <workItem from="1770347273616" duration="3672000" />
+      <workItem from="1770347273616" duration="4572000" />
     </task>
     <servers />
   </component>

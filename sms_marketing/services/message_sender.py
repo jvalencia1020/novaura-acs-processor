@@ -12,6 +12,7 @@ from twilio.base.exceptions import TwilioRestException
 from sms_marketing.models import SmsMessage, SmsSubscriber, SmsKeywordCampaign, SmsKeywordRule
 from external_models.models.communications import ContactEndpoint
 from external_models.models.messages import MessageTemplate
+from link_tracking.services.runtime_publisher import ensure_link_published
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,16 @@ class SMSMarketingMessageSender:
         formatted_from = self._format_phone_number(from_number)
         if not formatted_to or not formatted_from:
             logger.error(f"Invalid phone number format: to={to_number}, from={from_number}")
+            return False, None
+
+        # Publish link to DynamoDB so the link runtime can redirect when the user clicks
+        if not ensure_link_published(rule.short_link):
+            logger.error(
+                "Aborting send: failed to publish short link to DynamoDB (link_id=%s, domain=%s, slug=%s)",
+                rule.short_link.id,
+                rule.short_link.domain.domain_name,
+                rule.short_link.slug_canonical,
+            )
             return False, None
 
         try:
