@@ -184,6 +184,19 @@ resource "aws_security_group" "vpc_endpoints" {
   }
 }
 
+# Allow link-runtime ECS tasks to reach shared VPC endpoints (ECR, Secrets Manager).
+# Link-runtime adds this via its own Terraform; if this project owns the SG, we must
+# include the rule here or our apply will remove it and break link-runtime.
+resource "aws_security_group_rule" "vpc_endpoints_from_link_runtime" {
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = "sg-0487a1fcba60f06e2" # link-runtime ECS tasks (confirm in link-runtime terraform output)
+  security_group_id        = aws_security_group.vpc_endpoints.id
+  description              = "Allow HTTPS from link-runtime ECS tasks to VPC endpoint"
+}
+
 # Update the private_subnet_ids variable to use the existing subnets
 locals {
   private_subnet_ids = data.aws_subnets.private.ids

@@ -66,6 +66,9 @@ resource "aws_iam_role_policy" "ecs_execution_role_logs_policy" {
   })
 }
 
+# Account ID for resource ARNs (e.g. DynamoDB link-runtime table in same account)
+data "aws_caller_identity" "current" {}
+
 resource "aws_iam_role" "ecs_task_role" {
   name = "novaura-acs-ecs-task-role"
 
@@ -150,6 +153,17 @@ resource "aws_iam_role_policy" "ecs_task_role_policy" {
             "s3:ResourceAccount" = "054037109114"
           }
         }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/link-runtime-${var.environment}"
+        ]
       }
     ]
   })
