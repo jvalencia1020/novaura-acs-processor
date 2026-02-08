@@ -153,6 +153,8 @@ def _normalize_dynamic_param_allowlist(link: Link) -> List[str]:
     Build dynamic_param_allowlist as a List (L) of strings for DynamoDB.
     Runtime expects a real list (e.g. ["click_id", "sms_msg_id"]), not a single string.
     Ensures sms_msg_id is included when channel is sms.
+    Includes drip_step_id and reminder_message_id so links used in drip/reminder campaigns
+    forward those params from the request onto the redirect URL (attribution).
     """
     raw = link.dynamic_param_allowlist
     if isinstance(raw, list):
@@ -167,6 +169,10 @@ def _normalize_dynamic_param_allowlist(link: Link) -> List[str]:
         allowlist = ['click_id']
     if link.channel == 'sms' and 'sms_msg_id' not in allowlist:
         allowlist.append('sms_msg_id')
+    # So drip/reminder short URLs (e.g. ...?drip_step_id=128) get these params forwarded to destination
+    for param in ('drip_step_id', 'reminder_message_id'):
+        if param not in allowlist:
+            allowlist.append(param)
     return allowlist
 
 

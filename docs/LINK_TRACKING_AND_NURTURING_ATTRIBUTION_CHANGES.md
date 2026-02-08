@@ -153,8 +153,62 @@ Each **SmsSubscriber** can be associated with an **SMS marketing campaign** (`Sm
 
 ### Integration Notes for Message Processor
 
-- **When creating the SMS subscriber:** Please set **`sms_campaign`** (the SMS marketing campaign ID) whenever you create or resolve an `SmsSubscriber`. Use the campaign that is in context for the inbound message (e.g. the campaign whose keyword/rule matched, or the campaign that owns the endpoint). Example: when creating the subscriber in the webhook or in opt-in/action handlers, set `subscriber.sms_campaign = campaign` (or `subscriber.sms_campaign_id = campaign.id`) before saving. This keeps campaign-scoped queries and reporting accurate and avoids the need to infer campaign from endpoint only.
-- Existing subscriber rows will have `sms_campaign=None` until the processor is updated or data is backfilled.
+- **When creating or updating the SMS subscriber:** Set **`sms_campaign`** (the SMS marketing campaign ID) whenever you create or resolve an `SmsSubscriber`, or when they opt in. Use the campaign that is in context for the inbound message (e.g. the campaign whose keyword/rule matched). **Implemented:** `handle_opt_in` in `sms_marketing.services.actions` now sets `subscriber.sms_campaign = campaign` when processing opt-in (single, double, or none). This keeps campaign-scoped queries and reporting accurate.
+- Existing subscriber rows may have `sms_campaign=None` until they opt in again or data is backfilled.
+
+---
+
+## Part 5: Per-Campaign Subscription Tracking (SmsSubscriberCampaignSubscription)
+
+### Goal
+
+Track when a subscriber opts into (or out of) **different** SMS marketing campaigns that use the same endpoint. One `SmsSubscriber` remains per `(endpoint, phone_number)`; a new **subscription** row records each `(subscriber, campaign)` with status and timestamps so you can query “which campaigns has this subscriber opted into” and “which subscribers opted into this campaign.”
+
+### Model Changes (sms_marketing)
+
+**New model:** `sms_marketing.SmsSubscriberCampaignSubscription`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subscriber` | FK → `SmsSubscriber` (CASCADE) | The subscriber. |
+| `campaign` | FK → `SmsKeywordCampaign` (CASCADE) | The SMS campaign. |
+| `status` | CharField | `'pending_opt_in'`, `'opted_in'`, or `'opted_out'`. |
+| `opted_in_at` | DateTimeField | When they opted in (or when pending was set). |
+| `opt_in_message` | FK → `SmsMessage` (SET_NULL, null=True) | Message that triggered opt-in. |
+| `opted_out_at` | DateTimeField (null=True) | When they opted out (if ever). |
+| `opt_out_message` | FK → `SmsMessage` (SET_NULL, null=True) | Message that triggered opt-out. |
+| `created_at`, `updated_at` | DateTimeField | Audit. |
+
+- **Unique:** `(subscriber, campaign)` — at most one row per subscriber per campaign. Re-opt-in after opt-out updates the same row (status → `opted_in`, clear `opted_out_at` / `opt_out_message`).
+- **Related names:** `SmsSubscriber.campaign_subscriptions`, `SmsKeywordCampaign.subscriber_subscriptions`.
+- **Table:** `sms_subscriber_campaign_subscription`
+- **Indexes:** `(subscriber, campaign)`, `(campaign, status)`.
+
+**Migration:** `sms_marketing.0020_smssubscribercampaignsubscription` (depends on `sms_marketing.0019`).
+
+### Service Updates (sms_marketing.services.actions)
+
+- **handle_opt_in:** Inside the existing `transaction.atomic()` block, after updating the subscriber:
+  - **Get or create** `SmsSubscriberCampaignSubscription` for `(subscriber, campaign)`.
+  - Set `opted_in_at`, `opt_in_message`; single opt-in → `status = 'opted_in'`; double opt-in → `status = 'pending_opt_in'`; re-opt-in clears `opted_out_at` and `opt_out_message`.
+  - Sets `subscriber.sms_campaign = campaign` (see Part 4).
+- **handle_opt_out:** After updating the subscriber:
+  - **Get or create** subscription for `(subscriber, campaign)`; set `status = 'opted_out'`, `opted_out_at`, `opt_out_message`, save.
+  - **Global STOP:** All other subscriptions for this subscriber are updated to `status = 'opted_out'` and `opted_out_at` (same timestamp); `opt_out_message` is only set on the current campaign’s subscription row.
+
+### Admin (sms_marketing)
+
+- **SmsSubscriberCampaignSubscription** standalone admin: `list_display` (subscriber, campaign, status, opted_in_at, opted_out_at), `list_filter` (status, campaign), `search_fields` (subscriber__phone_number, campaign__name), `autocomplete_fields` (subscriber, campaign, opt_in_message, opt_out_message).
+- **Inlines:** `SmsSubscriber` has **SmsSubscriberCampaignSubscriptionInline** (campaign subscriptions). `SmsKeywordCampaign` has **SmsSubscriberCampaignSubscriptionCampaignInline** (subscriber subscriptions).
+
+### Integration Notes for Message Processor
+
+- **Double opt-in confirmation:** When the subscriber replies YES to confirm double opt-in, the code that handles that confirmation **must** set the `SmsSubscriberCampaignSubscription` for that `(subscriber, campaign)` to `status = 'opted_in'` and optionally update `opted_in_at` to the confirmation time. A comment in `handle_opt_in` in `sms_marketing.services.actions` points to this. The subscription row already exists with `status = 'pending_opt_in'` from the initial opt-in.
+- **Eligibility / routing:** You can use the subscription table to answer “is this subscriber opted into this campaign?” (e.g. filter by `status = 'opted_in'`) for routing or reporting; this is optional and can be adopted once subscriptions are populated.
+
+### API (optional / follow-up)
+
+- The plan allowed optional API: e.g. a `campaign_subscriptions` field on the SmsSubscriber serializer (list of subscription objects with campaign id/name, status, opted_in_at, opted_out_at), or a dedicated endpoint to list/filter `SmsSubscriberCampaignSubscription`. Not implemented in this change; can be added later.
 
 ---
 
@@ -166,7 +220,8 @@ Each **SmsSubscriber** can be associated with an **SMS marketing campaign** (`Sm
 | Nurturing scope for link campaigns | `LinkCampaignNurturingCampaignMapping` | link_tracking (model, migration 0008, serializers, admin) |
 | LinkCampaign API | `nurturing_campaign_ids`, `nurturing_campaign_mappings`; create accepts `nurturing_campaign_ids` | link_tracking API |
 | Step/message links | `short_link` on DripCampaignMessageStep, ReminderMessage, JourneyStep | acs (models, migration 0047, serializers, admin) |
-| SMS campaign on subscriber | `sms_campaign` on `SmsSubscriber`; filter by campaign, `sms_campaign_name` in API | sms_marketing (model, migration 0019, serializer, admin, viewset) |
+| SMS campaign on subscriber | `sms_campaign` on `SmsSubscriber`; filter by campaign, `sms_campaign_name` in API; `handle_opt_in` sets it | sms_marketing (model, migration 0019, serializer, admin, viewset, actions) |
+| Per-campaign subscription | `SmsSubscriberCampaignSubscription`; one row per (subscriber, campaign); status, opted_in_at/out, messages | sms_marketing (model, migration 0020, handle_opt_in/handle_opt_out, admin + inlines) |
 
 ---
 
@@ -181,7 +236,7 @@ When applying migrations, use:
 3. `python manage.py migrate acs`  
    - Applies `acs.0047` (short_link on drip/reminder/journey; depends on link_tracking.0008).
 4. `python manage.py migrate sms_marketing`  
-   - Applies `sms_marketing.0019` (sms_campaign on SmsSubscriber).
+   - Applies `sms_marketing.0019` (sms_campaign on SmsSubscriber), then `sms_marketing.0020` (SmsSubscriberCampaignSubscription).
 
 Or run `python manage.py migrate` once; Django will apply them in dependency order.
 
@@ -192,3 +247,5 @@ Or run `python manage.py migrate` once; Django will apply them in dependency ord
 - **handle_start_journey** in `sms_marketing.services.actions` does **not** yet set `originating_sms_message` or `originating_subscriber` on the created participant; that is left for a follow-up.
 - **BulkCampaignMessage** and **SmsMessage** do **not** have a `short_link` FK in this change; the message processor does not need to persist which link was in which sent message unless you add that later.
 - No new query params on the link (or link campaign) list API for “filter by nurturing campaign”; can be added later if needed.
+- **Double opt-in confirmation:** The handler that processes the subscriber’s “YES” reply to confirm double opt-in does **not** yet update `SmsSubscriberCampaignSubscription` to `status = 'opted_in'`; that is left for the processor engineer (see Part 5 integration notes).
+- **SmsSubscriberCampaignSubscription** is not yet exposed in the SmsSubscriber or campaign API (no `campaign_subscriptions` field or dedicated subscription endpoint); optional follow-up.

@@ -26,3 +26,13 @@ Role	Responsibility
 Your systems (control plane / any publisher)	Create and update DynamoDB items (PutItem) for each short link so the table is the “source of truth” for redirect config.
 Link runtime service	Read items by domain + slug (GetItem), apply policy/routing/params, and return 302.
 So yes: your other systems should publish/create (and update) the records in DynamoDB; that is how you feed the data so the link runtime service can process the redirects successfully.
+
+### Drip / reminder links (e.g. `?drip_step_id=128`)
+
+When the ACS processor sends a **drip** or **reminder** message that uses a short link, it:
+
+1. **Before send:** Calls `ensure_link_published(link, acs_context={...})`, which builds a runtime record from the `Link` and **PutItem**s it to the same DynamoDB table. The record uses **PK** = `DOMAIN#<domain>` and **SK** = `SLUG#<slug>` (e.g. `DOMAIN#textvictorylegal.com`, `SLUG#NEC`).
+2. **URL in message:** The link in the message is the short URL plus query params for attribution, e.g. `https://textvictorylegal.com/NEC?drip_step_id=128`. The `drip_step_id` (or `reminder_message_id`) is added by the ACS processor so you can attribute the click to that step.
+3. **Published record:** The publisher includes `drip_step_id` and `reminder_message_id` in **dynamic_param_allowlist** so the link runtime is allowed to **forward** those params from the incoming request onto the final redirect URL. So when a user clicks the link, the runtime does GetItem by domain+slug, then builds the redirect URL and adds any allowlisted request params (including `drip_step_id=128`) to the destination URL.
+
+So the URL you’re served (`https://textvictorylegal.com/NEC?drip_step_id=128`) is correct: the **domain + slug** identify the link in DynamoDB; the **query param** is passed through by the runtime to the destination for attribution. The record in the table was written by `ensure_link_published` before the message was sent.

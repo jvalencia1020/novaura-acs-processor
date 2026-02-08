@@ -102,7 +102,11 @@ class BulkCampaignProcessor:
             'campaign',
             'participant',
             'participant__lead',
-            'message_group'  # Add message group to select_related
+            'message_group',
+            'drip_message_step',
+            'drip_message_step__short_link',
+            'reminder_message',
+            'reminder_message__short_link',
         ).order_by('scheduled_for')  # Process messages in order of scheduled time
 
         processed_count = 0
@@ -125,9 +129,9 @@ class BulkCampaignProcessor:
                         # Message was marked for retry, skip processing for now
                         continue
                     else:
-                        # Message cannot be retried, mark as final failure
-                        logger.warning(f"Message {message.id} cannot be retried, marking as final failure")
-                        message.update_status('failed', {'error': 'Max retries exceeded'})
+                        # Message cannot be retried; mark as final failure so it is excluded from future runs
+                        logger.info(f"Message {message.id} max retries exceeded, marking as failed_final")
+                        message.update_status('failed_final', {'error': 'Max retries exceeded'})
                         continue
 
                 # Get all messages in the group
@@ -237,7 +241,11 @@ class BulkCampaignProcessor:
             'campaign',
             'participant',
             'participant__lead',
-            'message_group'
+            'message_group',
+            'drip_message_step',
+            'drip_message_step__short_link',
+            'reminder_message',
+            'reminder_message__short_link',
         ).order_by('scheduled_for')
 
         processed_count = 0
@@ -258,7 +266,8 @@ class BulkCampaignProcessor:
                     if self._handle_failed_message_retry(message):
                         logger.info(f"Retry message {message.id} marked for next retry attempt")
                     else:
-                        logger.warning(f"Retry message {message.id} exceeded max retries, marking as final failure")
+                        logger.info(f"Retry message {message.id} max retries exceeded, marking as failed_final")
+                        message.update_status('failed_final', {'error': 'Max retries exceeded'})
 
             except Exception as e:
                 logger.exception(f"Error processing retry message {message.id}: {e}")
@@ -280,7 +289,7 @@ class BulkCampaignProcessor:
         try:
             # Check if message can be retried
             if not message.can_retry():
-                logger.warning(f"Message {message.id} cannot be retried - max retries exceeded or invalid status")
+                logger.debug(f"Message {message.id} cannot be retried - max retries exceeded or invalid status")
                 return False
             
             # Check if there's already a retry message for this same message configuration
@@ -870,7 +879,8 @@ class BulkCampaignProcessor:
                     logger.error("Aborting send: failed to publish short link for drip step %s", message.drip_message_step.id)
                     return False
                 resolved_url = build_bulk_short_url(link, drip_step_id=message.drip_message_step.id)
-                extra_context = {'link': {'short_link': resolved_url}}
+                # Set both keys so {{link.short_link}} and {{Link.short_link}} resolve
+                extra_context = {'link': {'short_link': resolved_url}, 'Link': {'short_link': resolved_url}}
             elif campaign.campaign_type == 'reminder' and message.reminder_message and getattr(message.reminder_message, 'short_link_id', None):
                 link = message.reminder_message.short_link
                 acs_context = {
@@ -881,7 +891,18 @@ class BulkCampaignProcessor:
                     logger.error("Aborting send: failed to publish short link for reminder message %s", message.reminder_message.id)
                     return False
                 resolved_url = build_bulk_short_url(link, reminder_message_id=message.reminder_message.id)
-                extra_context = {'link': {'short_link': resolved_url}}
+                extra_context = {'link': {'short_link': resolved_url}, 'Link': {'short_link': resolved_url}}
+            else:
+                # Log when drip step content contains {{link.short_link}} but step has no link assigned
+                if campaign.campaign_type == 'drip' and message.drip_message_step and not getattr(message.drip_message_step, 'short_link_id', None):
+                    channel_config = message.drip_message_step.get_channel_config()
+                    raw_content = (channel_config.template.content if channel_config and getattr(channel_config, 'template', None) else None) or (channel_config.content if channel_config and getattr(channel_config, 'content', None) else '') or ''
+                    if raw_content and ('{{link.short_link}}' in raw_content or '{{Link.short_link}}' in raw_content):
+                        logger.warning(
+                            "Drip step %s has no short link assigned but message content contains {{link.short_link}}. "
+                            "Assign a Short Link to this drip step so the placeholder is replaced.",
+                            message.drip_message_step.id,
+                        )
             processed_content = message.get_message_content(extra_context=extra_context)
 
             # Get service phone number for SMS/Voice using modular channel configuration
@@ -1133,34 +1154,38 @@ class BulkCampaignProcessor:
 
     def _format_phone_number(self, phone_number):
         """
-        Format phone number to E.164 format required by Twilio
+        Format phone number to E.164 format required by Twilio, or return as-is for short codes.
         Args:
             phone_number (str): Raw phone number in any format (e.g., XXX-XXX-XXXX, (XXX) XXX-XXXX, etc.)
         Returns:
-            str: Phone number in E.164 format
+            str: Phone number in E.164 format, or short code digits as-is
         """
         if not phone_number:
             logger.debug("No phone number provided to format")
             return None
-            
+
         # Remove any non-digit characters (including hyphens, parentheses, spaces)
         digits = ''.join(filter(str.isdigit, phone_number))
-        
+
+        # Short codes (typically 4-6 digits) - return as-is; Twilio accepts them without country code
+        if 4 <= len(digits) <= 6:
+            return digits
+
         # Handle XXX-XXX-XXXX format (10 digits)
         if len(digits) == 10:
             formatted = f"+1{digits}"
             return formatted
-            
+
         # If number starts with 1 and is 11 digits, it's already a US number
         if len(digits) == 11 and digits.startswith('1'):
             formatted = f"+{digits}"
             return formatted
-            
+
         # If number already has country code (starts with +), just ensure it's clean
         if phone_number.startswith('+'):
             formatted = f"+{digits}"
             return formatted
-            
+
         # If we can't determine the format, return None
         logger.warning(f"Could not determine format for phone number: {phone_number}")
         return None

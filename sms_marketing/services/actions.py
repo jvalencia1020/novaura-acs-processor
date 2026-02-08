@@ -123,7 +123,7 @@ class SMSMarketingActionExecutor:
         state_manager = SMSMarketingStateManager()
         
         keyword = rule.keyword.keyword if rule else 'STOP'
-        result = state_manager.handle_opt_out(subscriber, keyword, message=message)
+        result = state_manager.handle_opt_out(subscriber, keyword, message=message, campaign=campaign)
         
         # Send opt-out confirmation
         self._send_opt_out_confirmation(subscriber, campaign)

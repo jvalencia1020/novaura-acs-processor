@@ -444,7 +444,8 @@ class BulkCampaignMessage(models.Model):
         ('sent', 'Sent'),
         ('delivered', 'Delivered'),
         ('failed', 'Failed'),
-        ('retry', 'Retry'),  # NEW STATUS
+        ('retry', 'Retry'),
+        ('failed_final', 'Failed (max retries exceeded)'),
         ('opened', 'Opened'),
         ('clicked', 'Clicked'),
         ('replied', 'Replied'),

@@ -606,38 +606,43 @@ class JourneyProcessor:
 
     def _format_phone_number(self, phone_number):
         """
-        Format phone number to E.164 format required by Twilio
+        Format phone number to E.164 format required by Twilio, or return as-is for short codes.
         Args:
             phone_number (str): Raw phone number in any format (e.g., XXX-XXX-XXXX, (XXX) XXX-XXXX, etc.)
         Returns:
-            str: Phone number in E.164 format
+            str: Phone number in E.164 format, or short code digits as-is
         """
         if not phone_number:
             logger.debug("No phone number provided to format")
             return None
-            
+
         # Remove any non-digit characters (including hyphens, parentheses, spaces)
         digits = ''.join(filter(str.isdigit, phone_number))
         logger.debug(f"Extracted digits from phone number: {digits}")
-        
+
+        # Short codes (typically 4-6 digits) - return as-is; Twilio accepts them without country code
+        if 4 <= len(digits) <= 6:
+            logger.debug(f"Treating as short code: {digits}")
+            return digits
+
         # Handle XXX-XXX-XXXX format (10 digits)
         if len(digits) == 10:
             formatted = f"+1{digits}"
             logger.debug(f"Formatted 10-digit number: {formatted}")
             return formatted
-            
+
         # If number starts with 1 and is 11 digits, it's already a US number
         if len(digits) == 11 and digits.startswith('1'):
             formatted = f"+{digits}"
             logger.debug(f"Formatted 11-digit number: {formatted}")
             return formatted
-            
+
         # If number already has country code (starts with +), just ensure it's clean
         if phone_number.startswith('+'):
             formatted = f"+{digits}"
             logger.debug(f"Formatted number with existing country code: {formatted}")
             return formatted
-            
+
         # If we can't determine the format, return None
         logger.debug(f"Could not determine format for phone number: {phone_number}")
         return None

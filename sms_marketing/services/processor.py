@@ -351,7 +351,9 @@ class SMSMarketingProcessor:
         campaign_context = self._get_campaign_context_for_global_command(endpoint, message)
 
         keyword = self._extract_keyword_candidate(message.body_normalized or message.body_raw)
-        result = state_manager.handle_opt_out(subscriber, keyword, message=message)
+        result = state_manager.handle_opt_out(
+            subscriber, keyword, message=message, campaign=campaign_context
+        )
         
         # Update message with subscriber link
         message.subscriber = subscriber
