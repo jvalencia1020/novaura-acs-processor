@@ -39,6 +39,14 @@ class SmsSubscriberCampaignSubscription(models.Model):
         related_name='opt_in_subscription_records',
         help_text='Message that triggered opt-in',
     )
+    opt_in_rule = models.ForeignKey(
+        'SmsKeywordRule',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='opt_in_subscription_records',
+        help_text='SMS keyword rule that triggered opt-in (use rule.short_link for dynamic link in drip/reminder).',
+    )
     opted_out_at = models.DateTimeField(
         null=True,
         blank=True,

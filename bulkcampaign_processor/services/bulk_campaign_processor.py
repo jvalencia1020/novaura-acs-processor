@@ -38,6 +38,7 @@ from shared_services.message_group_service import MessageGroupService
 from link_tracking.services.runtime_publisher import ensure_link_published
 from bulkcampaign_processor.utils.timezone_utils import convert_from_utc
 from bulkcampaign_processor.utils.short_link import build_bulk_short_url
+from sms_marketing.models import SmsSubscriberCampaignSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,77 @@ class BulkCampaignProcessor:
         self.validator = MessageValidationService(self.message_delivery)
         self.time_calculator = TimeCalculationService()
         self.message_group = MessageGroupService()
+
+    def _resolve_link_for_bulk_message(self, message, campaign):
+        """
+        Resolve the Link to use for a drip, reminder, or blast message.
+        Drip/Reminder: When use_opt_in_rule_link is True, prefer opt-in rule link (Path A then Path B),
+        then fallback to step/reminder short_link. When False, use the step's/reminder's short_link only.
+        Blast: No fixed short_link on schedule; use opt-in rule link (Path A then Path B) when available.
+        Returns (link, drip_step_id, reminder_message_id) or (None, None, None).
+        """
+        drip_step_id = None
+        reminder_message_id = None
+        fixed_link = None
+        use_opt_in = False
+
+        if campaign.campaign_type == 'drip' and message.drip_message_step:
+            step = message.drip_message_step
+            drip_step_id = step.id
+            fixed_link = getattr(step, 'short_link', None) if getattr(step, 'short_link_id', None) else None
+            use_opt_in = getattr(step, 'use_opt_in_rule_link', False)
+        elif campaign.campaign_type == 'reminder' and message.reminder_message:
+            rem = message.reminder_message
+            reminder_message_id = rem.id
+            fixed_link = getattr(rem, 'short_link', None) if getattr(rem, 'short_link_id', None) else None
+            use_opt_in = getattr(rem, 'use_opt_in_rule_link', False)
+        elif campaign.campaign_type == 'blast':
+            # Blast has no step/reminder short_link; use opt-in rule link only (Path A then B)
+            use_opt_in = True
+        else:
+            return (None, None, None)
+
+        if not use_opt_in:
+            return (fixed_link, drip_step_id, reminder_message_id)
+
+        participant = message.participant
+        link = None
+
+        # Path A: originating_sms_message -> rule -> short_link
+        if participant and getattr(participant, 'originating_sms_message_id', None):
+            msg = getattr(participant, 'originating_sms_message', None)
+            if msg and getattr(msg, 'rule_id', None):
+                rule = getattr(msg, 'rule', None)
+                if rule and getattr(rule, 'short_link_id', None):
+                    link = getattr(rule, 'short_link', None)
+
+        # Path B: originating_subscriber -> campaign subscription -> opt_in_rule.short_link
+        if link is None and participant and getattr(participant, 'originating_subscriber_id', None):
+            subscriber = getattr(participant, 'originating_subscriber', None)
+            if subscriber:
+                sms_campaign = None
+                if getattr(participant, 'originating_sms_message_id', None):
+                    msg = getattr(participant, 'originating_sms_message', None)
+                    if msg:
+                        sms_campaign = getattr(msg, 'sms_campaign', None)
+                if sms_campaign is None:
+                    sms_campaign = getattr(subscriber, 'sms_campaign', None)
+                if sms_campaign:
+                    subscription = (
+                        SmsSubscriberCampaignSubscription.objects
+                        .filter(subscriber=subscriber, campaign=sms_campaign)
+                        .select_related('opt_in_rule', 'opt_in_rule__short_link')
+                        .first()
+                    )
+                    if subscription and getattr(subscription, 'opt_in_rule_id', None):
+                        rule = getattr(subscription, 'opt_in_rule', None)
+                        if rule and getattr(rule, 'short_link_id', None):
+                            link = getattr(rule, 'short_link', None)
+
+        if link is None:
+            link = fixed_link
+
+        return (link, drip_step_id, reminder_message_id)
 
     def process_campaign(self, campaign):
         """
@@ -102,6 +174,11 @@ class BulkCampaignProcessor:
             'campaign',
             'participant',
             'participant__lead',
+            'participant__originating_sms_message',
+            'participant__originating_sms_message__rule',
+            'participant__originating_sms_message__rule__short_link',
+            'participant__originating_sms_message__sms_campaign',
+            'participant__originating_subscriber',
             'message_group',
             'drip_message_step',
             'drip_message_step__short_link',
@@ -241,6 +318,11 @@ class BulkCampaignProcessor:
             'campaign',
             'participant',
             'participant__lead',
+            'participant__originating_sms_message',
+            'participant__originating_sms_message__rule',
+            'participant__originating_sms_message__rule__short_link',
+            'participant__originating_sms_message__sms_campaign',
+            'participant__originating_subscriber',
             'message_group',
             'drip_message_step',
             'drip_message_step__short_link',
@@ -860,48 +942,54 @@ class BulkCampaignProcessor:
                     logger.debug(f"Cannot send blast message {message.id} - outside campaign operating hours")
                     return False
 
-            # Check if it's time to send blast messages
-            if campaign.campaign_type == 'blast' and hasattr(campaign, 'blast_schedule') and campaign.blast_schedule:
+            # For blast: use message.scheduled_for as source of truth (already used for "due" query).
+            # Avoids first-send failure when schedule.send_time and message.scheduled_for differ (e.g. timezone).
+            if campaign.campaign_type == 'blast' and message.scheduled_for:
                 now = timezone.now()
-                if now < campaign.blast_schedule.send_time:
-                    logger.debug(f"Cannot send blast message {message.id} - send time not reached yet")
+                if now < message.scheduled_for:
+                    logger.debug(f"Cannot send blast message {message.id} - scheduled_for {message.scheduled_for} not reached yet")
                     return False
 
             # Get message content (with optional short link for drip/reminder steps)
             extra_context = None
-            if campaign.campaign_type == 'drip' and message.drip_message_step and getattr(message.drip_message_step, 'short_link_id', None):
-                link = message.drip_message_step.short_link
+            link, drip_step_id, reminder_message_id = self._resolve_link_for_bulk_message(message, campaign)
+            if link is not None:
                 acs_context = {
                     'lead': message.participant.lead,
                     'campaign': campaign,
                 }
                 if not ensure_link_published(link, acs_context=acs_context):
-                    logger.error("Aborting send: failed to publish short link for drip step %s", message.drip_message_step.id)
+                    if drip_step_id is not None:
+                        logger.error("Aborting send: failed to publish short link for drip step %s", drip_step_id)
+                    elif reminder_message_id is not None:
+                        logger.error("Aborting send: failed to publish short link for reminder message %s", reminder_message_id)
+                    else:
+                        logger.error("Aborting send: failed to publish short link for blast message %s", message.id)
                     return False
-                resolved_url = build_bulk_short_url(link, drip_step_id=message.drip_message_step.id)
+                resolved_url = build_bulk_short_url(
+                    link,
+                    drip_step_id=drip_step_id,
+                    reminder_message_id=reminder_message_id,
+                )
                 # Set both keys so {{link.short_link}} and {{Link.short_link}} resolve
                 extra_context = {'link': {'short_link': resolved_url}, 'Link': {'short_link': resolved_url}}
-            elif campaign.campaign_type == 'reminder' and message.reminder_message and getattr(message.reminder_message, 'short_link_id', None):
-                link = message.reminder_message.short_link
-                acs_context = {
-                    'lead': message.participant.lead,
-                    'campaign': campaign,
-                }
-                if not ensure_link_published(link, acs_context=acs_context):
-                    logger.error("Aborting send: failed to publish short link for reminder message %s", message.reminder_message.id)
-                    return False
-                resolved_url = build_bulk_short_url(link, reminder_message_id=message.reminder_message.id)
-                extra_context = {'link': {'short_link': resolved_url}, 'Link': {'short_link': resolved_url}}
             else:
-                # Log when drip step content contains {{link.short_link}} but step has no link assigned
-                if campaign.campaign_type == 'drip' and message.drip_message_step and not getattr(message.drip_message_step, 'short_link_id', None):
-                    channel_config = message.drip_message_step.get_channel_config()
+                # Log when content contains {{link.short_link}} but no link could be resolved
+                if campaign.campaign_type in ('drip', 'reminder', 'blast'):
+                    channel_config = None
+                    if campaign.campaign_type == 'drip' and message.drip_message_step:
+                        channel_config = message.drip_message_step.get_channel_config()
+                    elif campaign.campaign_type == 'reminder' and message.reminder_message:
+                        channel_config = message.reminder_message.get_channel_config()
+                    elif campaign.campaign_type == 'blast':
+                        channel_config = self._get_campaign_channel_config(campaign)
                     raw_content = (channel_config.template.content if channel_config and getattr(channel_config, 'template', None) else None) or (channel_config.content if channel_config and getattr(channel_config, 'content', None) else '') or ''
                     if raw_content and ('{{link.short_link}}' in raw_content or '{{Link.short_link}}' in raw_content):
                         logger.warning(
-                            "Drip step %s has no short link assigned but message content contains {{link.short_link}}. "
-                            "Assign a Short Link to this drip step so the placeholder is replaced.",
-                            message.drip_message_step.id,
+                            "%s %s has no short link resolved but message content contains {{link.short_link}}. "
+                            "Assign a Short Link or enable use_opt_in_rule_link with a valid opt-in rule link.",
+                            "Drip step" if campaign.campaign_type == 'drip' else ("Reminder message" if campaign.campaign_type == 'reminder' else "Blast"),
+                            message.drip_message_step.id if campaign.campaign_type == 'drip' else (message.reminder_message.id if campaign.campaign_type == 'reminder' else message.id),
                         )
             processed_content = message.get_message_content(extra_context=extra_context)
 

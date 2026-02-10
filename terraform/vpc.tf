@@ -184,15 +184,24 @@ resource "aws_security_group" "vpc_endpoints" {
   }
 }
 
+# ---------------------------------------------------------------------------
+# Add this to your novaura-acs Terraform (the project that owns
+# aws_security_group.vpc_endpoints). This prevents your apply from removing
+# the rule that lets link-runtime ECS tasks reach ECR/Secrets Manager.
+#
+# After adding, run terraform plan again. You should see this rule being
+# created (or no removal of the link-runtime rule). Then apply.
+# ---------------------------------------------------------------------------
+
 # Allow link-runtime ECS tasks to reach shared VPC endpoints (ECR, Secrets Manager).
-# Link-runtime adds this via its own Terraform; if this project owns the SG, we must
-# include the rule here or our apply will remove it and break link-runtime.
+# Link-runtime adds this via its own Terraform; because this project owns the SG,
+# we must declare it here or our apply would remove it and break link-runtime.
 resource "aws_security_group_rule" "vpc_endpoints_from_link_runtime" {
   type                     = "ingress"
   from_port                = 443
   to_port                  = 443
   protocol                 = "tcp"
-  source_security_group_id = "sg-0487a1fcba60f06e2" # link-runtime ECS tasks (confirm in link-runtime terraform output)
+  source_security_group_id = "sg-0487a1fcba60f06e2"  # link-runtime ECS tasks
   security_group_id        = aws_security_group.vpc_endpoints.id
   description              = "Allow HTTPS from link-runtime ECS tasks to VPC endpoint"
 }

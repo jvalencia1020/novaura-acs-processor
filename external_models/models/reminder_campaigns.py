@@ -169,6 +169,11 @@ class ReminderMessage(models.Model):
         help_text='Optional short link to include in this message',
     )
 
+    use_opt_in_rule_link = models.BooleanField(
+        default=False,
+        help_text='If True, the message processor should use the short link from the SMS keyword rule that opted in the subscriber (e.g. participant.originating_sms_message.rule.short_link) instead of the fixed short_link above.',
+    )
+
     class Meta:
         managed = False
         db_table = 'acs_remindermessage'
