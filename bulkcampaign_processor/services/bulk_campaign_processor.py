@@ -59,13 +59,22 @@ class BulkCampaignProcessor:
         self.time_calculator = TimeCalculationService()
         self.message_group = MessageGroupService()
 
+    def _keyword_from_rule(self, rule):
+        """Get keyword text from SmsKeywordRule (rule.keyword.keyword)."""
+        if not rule:
+            return ''
+        kw = getattr(rule, 'keyword', None)
+        return getattr(kw, 'keyword', '') if kw else ''
+
     def _resolve_link_for_bulk_message(self, message, campaign):
         """
-        Resolve the Link to use for a drip, reminder, or blast message.
+        Resolve the Link and opt-in keyword for a drip, reminder, or blast message.
         Drip/Reminder: When use_opt_in_rule_link is True, prefer opt-in rule link (Path A then Path B),
         then fallback to step/reminder short_link. When False, use the step's/reminder's short_link only.
         Blast: No fixed short_link on schedule; use opt-in rule link (Path A then Path B) when available.
-        Returns (link, drip_step_id, reminder_message_id) or (None, None, None).
+        Keyword is resolved from the same rule used for the link when available, or from Path A/B when
+        participant exists (for body {{keyword.keyword}} and UTM ${keyword}).
+        Returns (link, drip_step_id, reminder_message_id, keyword_str).
         """
         drip_step_id = None
         reminder_message_id = None
@@ -86,49 +95,79 @@ class BulkCampaignProcessor:
             # Blast has no step/reminder short_link; use opt-in rule link only (Path A then B)
             use_opt_in = True
         else:
-            return (None, None, None)
+            return (None, None, None, '')
 
-        if not use_opt_in:
-            return (fixed_link, drip_step_id, reminder_message_id)
+        participant = getattr(message, 'participant', None)
+        link = fixed_link if not use_opt_in else None
+        rule_for_keyword = None
 
-        participant = message.participant
-        link = None
+        if use_opt_in and participant:
+            # Path A: originating_sms_message -> rule -> short_link
+            if getattr(participant, 'originating_sms_message_id', None):
+                msg = getattr(participant, 'originating_sms_message', None)
+                if msg and getattr(msg, 'rule_id', None):
+                    rule = getattr(msg, 'rule', None)
+                    if rule and getattr(rule, 'short_link_id', None):
+                        link = getattr(rule, 'short_link', None)
+                        rule_for_keyword = rule
 
-        # Path A: originating_sms_message -> rule -> short_link
-        if participant and getattr(participant, 'originating_sms_message_id', None):
-            msg = getattr(participant, 'originating_sms_message', None)
-            if msg and getattr(msg, 'rule_id', None):
-                rule = getattr(msg, 'rule', None)
-                if rule and getattr(rule, 'short_link_id', None):
-                    link = getattr(rule, 'short_link', None)
+            # Path B: originating_subscriber -> campaign subscription -> opt_in_rule.short_link
+            if link is None and getattr(participant, 'originating_subscriber_id', None):
+                subscriber = getattr(participant, 'originating_subscriber', None)
+                if subscriber:
+                    sms_campaign = None
+                    if getattr(participant, 'originating_sms_message_id', None):
+                        msg = getattr(participant, 'originating_sms_message', None)
+                        if msg:
+                            sms_campaign = getattr(msg, 'sms_campaign', None)
+                    if sms_campaign is None:
+                        sms_campaign = getattr(subscriber, 'sms_campaign', None)
+                    if sms_campaign:
+                        subscription = (
+                            SmsSubscriberCampaignSubscription.objects
+                            .filter(subscriber=subscriber, campaign=sms_campaign)
+                            .select_related('opt_in_rule', 'opt_in_rule__short_link', 'opt_in_rule__keyword')
+                            .first()
+                        )
+                        if subscription and getattr(subscription, 'opt_in_rule_id', None):
+                            rule = getattr(subscription, 'opt_in_rule', None)
+                            if rule and getattr(rule, 'short_link_id', None):
+                                link = getattr(rule, 'short_link', None)
+                                rule_for_keyword = rule
 
-        # Path B: originating_subscriber -> campaign subscription -> opt_in_rule.short_link
-        if link is None and participant and getattr(participant, 'originating_subscriber_id', None):
-            subscriber = getattr(participant, 'originating_subscriber', None)
-            if subscriber:
-                sms_campaign = None
-                if getattr(participant, 'originating_sms_message_id', None):
-                    msg = getattr(participant, 'originating_sms_message', None)
-                    if msg:
-                        sms_campaign = getattr(msg, 'sms_campaign', None)
-                if sms_campaign is None:
-                    sms_campaign = getattr(subscriber, 'sms_campaign', None)
-                if sms_campaign:
-                    subscription = (
-                        SmsSubscriberCampaignSubscription.objects
-                        .filter(subscriber=subscriber, campaign=sms_campaign)
-                        .select_related('opt_in_rule', 'opt_in_rule__short_link')
-                        .first()
-                    )
-                    if subscription and getattr(subscription, 'opt_in_rule_id', None):
-                        rule = getattr(subscription, 'opt_in_rule', None)
-                        if rule and getattr(rule, 'short_link_id', None):
-                            link = getattr(rule, 'short_link', None)
+            if link is None:
+                link = fixed_link
 
-        if link is None:
-            link = fixed_link
+        # Resolve keyword for UTM and body: from rule when we have it, else try Path A/B for keyword only
+        if rule_for_keyword:
+            keyword_str = self._keyword_from_rule(rule_for_keyword)
+        elif participant:
+            # e.g. fixed link used but we still want keyword for body/UTM
+            if getattr(participant, 'originating_sms_message_id', None):
+                msg = getattr(participant, 'originating_sms_message', None)
+                if msg and getattr(msg, 'rule_id', None):
+                    rule_for_keyword = getattr(msg, 'rule', None)
+            if not rule_for_keyword and getattr(participant, 'originating_subscriber_id', None):
+                subscriber = getattr(participant, 'originating_subscriber', None)
+                if subscriber:
+                    om = getattr(participant, 'originating_sms_message', None)
+                    sms_campaign = getattr(om, 'sms_campaign', None) if om else None
+                    if sms_campaign is None:
+                        sms_campaign = getattr(subscriber, 'sms_campaign', None)
+                    if sms_campaign:
+                        sub = (
+                            SmsSubscriberCampaignSubscription.objects
+                            .filter(subscriber=subscriber, campaign=sms_campaign)
+                            .select_related('opt_in_rule', 'opt_in_rule__keyword')
+                            .first()
+                        )
+                        if sub and getattr(sub, 'opt_in_rule_id', None):
+                            rule_for_keyword = getattr(sub, 'opt_in_rule', None)
+            keyword_str = self._keyword_from_rule(rule_for_keyword) if rule_for_keyword else ''
+        else:
+            keyword_str = ''
 
-        return (link, drip_step_id, reminder_message_id)
+        return (link, drip_step_id, reminder_message_id, keyword_str)
 
     def process_campaign(self, campaign):
         """
@@ -177,6 +216,7 @@ class BulkCampaignProcessor:
             'participant__originating_sms_message',
             'participant__originating_sms_message__rule',
             'participant__originating_sms_message__rule__short_link',
+            'participant__originating_sms_message__rule__keyword',
             'participant__originating_sms_message__sms_campaign',
             'participant__originating_subscriber',
             'message_group',
@@ -321,6 +361,7 @@ class BulkCampaignProcessor:
             'participant__originating_sms_message',
             'participant__originating_sms_message__rule',
             'participant__originating_sms_message__rule__short_link',
+            'participant__originating_sms_message__rule__keyword',
             'participant__originating_sms_message__sms_campaign',
             'participant__originating_subscriber',
             'message_group',
@@ -950,15 +991,31 @@ class BulkCampaignProcessor:
                     logger.debug(f"Cannot send blast message {message.id} - scheduled_for {message.scheduled_for} not reached yet")
                     return False
 
-            # Get message content (with optional short link for drip/reminder steps)
+            # Get message content (with optional short link and keyword for drip/reminder/blast)
             extra_context = None
-            link, drip_step_id, reminder_message_id = self._resolve_link_for_bulk_message(message, campaign)
+            link, drip_step_id, reminder_message_id, keyword_str = self._resolve_link_for_bulk_message(message, campaign)
             if link is not None:
                 acs_context = {
                     'lead': message.participant.lead,
                     'campaign': campaign,
                 }
-                if not ensure_link_published(link, acs_context=acs_context):
+                # Resolve service_phone for utm_context short_code (from number)
+                service_phone_for_link = None
+                if campaign.channel in ['sms', 'voice']:
+                    ch_config = None
+                    if campaign.campaign_type == 'drip' and message.drip_message_step:
+                        ch_config = message.drip_message_step.get_channel_config()
+                    elif campaign.campaign_type == 'reminder' and message.reminder_message:
+                        ch_config = message.reminder_message.get_channel_config()
+                    elif campaign.campaign_type == 'blast':
+                        ch_config = self._get_campaign_channel_config(campaign)
+                    if ch_config and hasattr(ch_config, 'get_from_number'):
+                        service_phone_for_link = ch_config.get_from_number()
+                utm_context = {
+                    'keyword': keyword_str or '',
+                    'short_code': service_phone_for_link or '',
+                }
+                if not ensure_link_published(link, utm_context=utm_context, acs_context=acs_context):
                     if drip_step_id is not None:
                         logger.error("Aborting send: failed to publish short link for drip step %s", drip_step_id)
                     elif reminder_message_id is not None:
@@ -971,9 +1028,20 @@ class BulkCampaignProcessor:
                     drip_step_id=drip_step_id,
                     reminder_message_id=reminder_message_id,
                 )
-                # Set both keys so {{link.short_link}} and {{Link.short_link}} resolve
-                extra_context = {'link': {'short_link': resolved_url}, 'Link': {'short_link': resolved_url}}
+                # Set link and keyword so {{link.short_link}} and {{keyword.keyword}} resolve
+                extra_context = {
+                    'link': {'short_link': resolved_url},
+                    'Link': {'short_link': resolved_url},
+                    'keyword': {'keyword': keyword_str},
+                    'Keyword': {'keyword': keyword_str},
+                }
             else:
+                # Still pass keyword for body {{keyword.keyword}} when no link resolved
+                if keyword_str:
+                    extra_context = {
+                        'keyword': {'keyword': keyword_str},
+                        'Keyword': {'keyword': keyword_str},
+                    }
                 # Log when content contains {{link.short_link}} but no link could be resolved
                 if campaign.campaign_type in ('drip', 'reminder', 'blast'):
                     channel_config = None

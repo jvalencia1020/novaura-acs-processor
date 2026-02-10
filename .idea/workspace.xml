@@ -6,11 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/drip_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/drip_campaigns.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/reminder_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/reminder_campaigns.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/subscriber_campaign_subscription.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/subscriber_campaign_subscription.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/terraform/vpc.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/vpc.tf" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -266,7 +261,7 @@
       <workItem from="1769543550330" duration="8995000" />
       <workItem from="1770347273616" duration="4572000" />
       <workItem from="1770413124519" duration="8731000" />
-      <workItem from="1770487734418" duration="19020000" />
+      <workItem from="1770487734418" duration="19646000" />
     </task>
     <servers />
   </component>

@@ -7,6 +7,8 @@ def _get_context_value(context, category, name, field_name):
     model_data = context.get(category)
     if model_data is None and category and category.lower() == 'link':
         model_data = context.get('Link') if category == 'link' else context.get('link')
+    if model_data is None and category and category.lower() == 'keyword':
+        model_data = context.get('Keyword') if category == 'keyword' else context.get('keyword')
     if model_data is None:
         model_data = {}
     if isinstance(model_data, dict):
@@ -57,6 +59,20 @@ def replace_variables(content, context):
                 value = link_data.get('short_link', '')
             else:
                 value = getattr(link_data, 'short_link', '') if link_data else ''
+            content = content.replace(placeholder, str(value))
+
+    # Fallback: resolve {{keyword.keyword}} / {{Keyword.keyword}} from context even if not in TemplateVariable
+    keyword_placeholders = [
+        ('{{keyword.keyword}}', 'keyword'),
+        ('{{Keyword.keyword}}', 'Keyword'),
+    ]
+    for placeholder, key in keyword_placeholders:
+        if placeholder in content:
+            keyword_data = context.get(key) or context.get('Keyword' if key == 'keyword' else 'keyword')
+            if isinstance(keyword_data, dict):
+                value = keyword_data.get('keyword', '')
+            else:
+                value = getattr(keyword_data, 'keyword', '') if keyword_data else ''
             content = content.replace(placeholder, str(value))
 
     return content 
