@@ -133,4 +133,10 @@ variable "twilio_credentials_arn" {
 variable "bland_ai_api_key_arn" {
   description = "ARN of the Secrets Manager secret containing Bland AI API key"
   type        = string
+}
+
+variable "vpc_endpoint_ingress_security_group_ids" {
+  description = "Additional security group IDs allowed to reach VPC endpoints (HTTPS 443). This project's ECS and link-runtime ECS are already allowed."
+  type        = list(string)
+  default     = []
 } 

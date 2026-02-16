@@ -185,25 +185,38 @@ resource "aws_security_group" "vpc_endpoints" {
 }
 
 # ---------------------------------------------------------------------------
-# Add this to your novaura-acs Terraform (the project that owns
-# aws_security_group.vpc_endpoints). This prevents your apply from removing
-# the rule that lets link-runtime ECS tasks reach ECR/Secrets Manager.
+# Single ownership: this project owns the VPC endpoints SG (ecr.api, ecr.dkr,
+# secretsmanager, logs, rds). We create the rule that allows link-runtime ECS
+# tasks to reach those endpoints over HTTPS.
 #
-# After adding, run terraform plan again. You should see this rule being
-# created (or no removal of the link-runtime rule). Then apply.
+# Link-runtime (vpc_endpoints.tf) uses vpc_endpoint_security_group_ids_excluded
+# to skip this SG so it does not create a duplicate rule. Set in link-runtime:
+#   vpc_endpoint_security_group_ids_excluded = ["<this SG id, e.g. sg-0111d873c5c28caa8>"]
 # ---------------------------------------------------------------------------
 
-# Allow link-runtime ECS tasks to reach shared VPC endpoints (ECR, Secrets Manager).
-# Link-runtime adds this via its own Terraform; because this project owns the SG,
-# we must declare it here or our apply would remove it and break link-runtime.
+# Same rule as link-runtime's aws_security_group_rule.vpc_endpoint_from_ecs
+# for this SG: ingress 443 from link-runtime ECS tasks to VPC endpoint.
 resource "aws_security_group_rule" "vpc_endpoints_from_link_runtime" {
   type                     = "ingress"
   from_port                = 443
   to_port                  = 443
   protocol                 = "tcp"
-  source_security_group_id = "sg-0487a1fcba60f06e2"  # link-runtime ECS tasks
+  source_security_group_id = "sg-0487a1fcba60f06e2"  # link-runtime ECS tasks (ecs_tasks.id)
   security_group_id        = aws_security_group.vpc_endpoints.id
   description              = "Allow HTTPS from link-runtime ECS tasks to VPC endpoint"
+}
+
+# Additional security groups allowed to reach VPC endpoints (ECR, Secrets Manager, etc.).
+# Set vpc_endpoint_ingress_security_group_ids in terraform.tfvars to add more.
+resource "aws_security_group_rule" "vpc_endpoints_ingress" {
+  for_each                 = toset(var.vpc_endpoint_ingress_security_group_ids)
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = each.value
+  security_group_id        = aws_security_group.vpc_endpoints.id
+  description              = "Allow HTTPS to VPC endpoints (additional SG)"
 }
 
 # Update the private_subnet_ids variable to use the existing subnets
