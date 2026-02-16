@@ -10,8 +10,13 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: novaura-acs-processor
   ECS_CLUSTER: novaura-acs-processor-cluster
-  ECS_SERVICE_SCHEDULER: novaura-acs-processor-scheduler
-  ECS_SERVICE_WORKER: novaura-acs-processor-worker
+  # ECS services (from terraform/ecs.tf)
+  ECS_SERVICE_BULK_SCHEDULER: novaura-acs-bulk-campaign-scheduler
+  ECS_SERVICE_JOURNEY_SCHEDULER: novaura-acs-journey-scheduler
+  ECS_SERVICE_BULK_WORKER: novaura-acs-bulk-campaign-worker
+  ECS_SERVICE_JOURNEY_WORKER: novaura-acs-journey-worker
+  ECS_SERVICE_COMMUNICATION_WORKER: novaura-acs-communication-processor-worker-service
+  ECS_SERVICE_SMS_MARKETING_WORKER: novaura-acs-sms-marketing-worker-service
 
 jobs:
   test:
@@ -86,9 +91,9 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
           
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.0.0"
+          terraform_version: "1.6.6"
 
       - name: Terraform Init
         run: terraform init -reconfigure
@@ -106,11 +111,10 @@ jobs:
           TF_VAR_db_host: ${{ secrets.DB_HOST }}
           TF_VAR_db_password_arn: ${{ secrets.DB_PASSWORD_ARN }}
           TF_VAR_django_secret_key_arn: ${{ secrets.DJANGO_SECRET_KEY_ARN }}
-          TF_VAR_private_subnet_ids: ${{ secrets.PRIVATE_SUBNET_IDS }}
-          TF_VAR_vpc_id: ${{ secrets.VPC_ID }}
           TF_VAR_rds_security_group_id: ${{ secrets.RDS_SECURITY_GROUP_ID }}
           TF_VAR_twilio_credentials_arn: ${{ secrets.TWILIO_CREDENTIALS_ARN }}
           TF_VAR_bland_ai_api_key_arn: ${{ secrets.BLAND_AI_API_KEY_ARN }}
+          TF_VAR_vpc_endpoint_ingress_security_group_ids: ${{ secrets.VPC_ENDPOINT_INGRESS_SECURITY_GROUP_IDS == '' && '[]' || secrets.VPC_ENDPOINT_INGRESS_SECURITY_GROUP_IDS }}
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
@@ -125,8 +129,7 @@ jobs:
           TF_VAR_db_host: ${{ secrets.DB_HOST }}
           TF_VAR_db_password_arn: ${{ secrets.DB_PASSWORD_ARN }}
           TF_VAR_django_secret_key_arn: ${{ secrets.DJANGO_SECRET_KEY_ARN }}
-          TF_VAR_private_subnet_ids: ${{ secrets.PRIVATE_SUBNET_IDS }}
-          TF_VAR_vpc_id: ${{ secrets.VPC_ID }}
           TF_VAR_rds_security_group_id: ${{ secrets.RDS_SECURITY_GROUP_ID }}
           TF_VAR_twilio_credentials_arn: ${{ secrets.TWILIO_CREDENTIALS_ARN }}
-          TF_VAR_bland_ai_api_key_arn: ${{ secrets.BLAND_AI_API_KEY_ARN }} 
+          TF_VAR_bland_ai_api_key_arn: ${{ secrets.BLAND_AI_API_KEY_ARN }}
+          TF_VAR_vpc_endpoint_ingress_security_group_ids: ${{ secrets.VPC_ENDPOINT_INGRESS_SECURITY_GROUP_IDS == '' && '[]' || secrets.VPC_ENDPOINT_INGRESS_SECURITY_GROUP_IDS }} 

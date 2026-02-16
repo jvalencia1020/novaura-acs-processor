@@ -226,8 +226,11 @@ class SMSMarketingActionExecutor:
             nurturing_campaign = LeadNurturingCampaign.objects.get(id=nurturing_campaign_id)
         except LeadNurturingCampaign.DoesNotExist:
             return ExecutionResult(False, 'error', {'error': 'Nurturing campaign not found'}, 'Nurturing campaign not found')
-        
+
+        # Ensure lead exists (create for CRM campaign if missing) so we can create participant
         lead = subscriber.lead
+        if not lead:
+            lead = self._link_or_create_lead(subscriber, campaign, action_config or {'create_lead_if_missing': True})
         if not lead:
             return ExecutionResult(False, 'error', {'error': 'Subscriber has no linked lead'}, 'Subscriber has no linked lead')
         created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
@@ -264,10 +267,11 @@ class SMSMarketingActionExecutor:
             nurturing_campaign=nurturing_campaign,
             defaults=defaults,
         )
-        if not created and participant.originating_subscription_id is None:
+        # Always set originating_subscription so it's set on create and when participant existed without it
+        if participant.originating_subscription_id != subscription.id:
             participant.originating_subscription = subscription
             participant.save(update_fields=['originating_subscription_id'])
-        
+
         # Enqueue first step (this would trigger journey processor)
         # You may need to enqueue a task here to start the journey
         # For now, we'll just create the participant
@@ -406,16 +410,22 @@ class SMSMarketingActionExecutor:
         rule=None,
     ):
         """
-        If campaign has follow_up_nurturing_campaign and subscriber has a lead, create or get
-        LeadNurturingParticipant (drip/reminder/blast) with originating_subscription pointing to
-        the campaign-level opt-in subscription. Returns the participant or None.
+        When campaign has follow_up_nurturing_campaign, always enroll the subscriber into that
+        lead nurturing campaign: create the lead for the CRM campaign if not already created,
+        then create or get the participant with originating_subscription set to the campaign-level
+        opt-in subscription. Returns the participant or None.
         """
         nurturing_campaign = getattr(campaign, 'follow_up_nurturing_campaign', None)
         if not nurturing_campaign:
             return None
+
+        # Ensure lead exists so we can enroll (create for CRM campaign if missing)
         lead = subscriber.lead
         if not lead:
+            lead = self._link_or_create_lead(subscriber, campaign, {'create_lead_if_missing': True})
+        if not lead:
             return None
+
         # created_by_id is required by the DB; use the nurturing campaign's creator
         created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
         if not created_by_id:
@@ -455,7 +465,8 @@ class SMSMarketingActionExecutor:
             nurturing_campaign=nurturing_campaign,
             defaults=defaults,
         )
-        if not created and participant.originating_subscription_id is None:
+        # Always set originating_subscription so it's set on create and when participant existed without it
+        if participant.originating_subscription_id != subscription.id:
             participant.originating_subscription = subscription
             participant.save(update_fields=['originating_subscription_id'])
         return participant
