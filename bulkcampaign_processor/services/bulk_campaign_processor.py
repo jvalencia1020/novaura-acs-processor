@@ -102,67 +102,24 @@ class BulkCampaignProcessor:
         rule_for_keyword = None
 
         if use_opt_in and participant:
-            # Path A: originating_sms_message -> rule -> short_link
-            if getattr(participant, 'originating_sms_message_id', None):
-                msg = getattr(participant, 'originating_sms_message', None)
-                if msg and getattr(msg, 'rule_id', None):
-                    rule = getattr(msg, 'rule', None)
-                    if rule and getattr(rule, 'short_link_id', None):
-                        link = getattr(rule, 'short_link', None)
-                        rule_for_keyword = rule
-
-            # Path B: originating_subscriber -> campaign subscription -> opt_in_rule.short_link
-            if link is None and getattr(participant, 'originating_subscriber_id', None):
-                subscriber = getattr(participant, 'originating_subscriber', None)
-                if subscriber:
-                    sms_campaign = None
-                    if getattr(participant, 'originating_sms_message_id', None):
-                        msg = getattr(participant, 'originating_sms_message', None)
-                        if msg:
-                            sms_campaign = getattr(msg, 'sms_campaign', None)
-                    if sms_campaign is None:
-                        sms_campaign = getattr(subscriber, 'sms_campaign', None)
-                    if sms_campaign:
-                        subscription = (
-                            SmsSubscriberCampaignSubscription.objects
-                            .filter(subscriber=subscriber, campaign=sms_campaign)
-                            .select_related('opt_in_rule', 'opt_in_rule__short_link', 'opt_in_rule__keyword')
-                            .first()
-                        )
-                        if subscription and getattr(subscription, 'opt_in_rule_id', None):
-                            rule = getattr(subscription, 'opt_in_rule', None)
-                            if rule and getattr(rule, 'short_link_id', None):
-                                link = getattr(rule, 'short_link', None)
-                                rule_for_keyword = rule
+            # Prefer originating_subscription (campaign-scoped opt-in): subscription.opt_in_rule -> short_link
+            subscription = getattr(participant, 'originating_subscription', None)
+            if subscription and getattr(subscription, 'opt_in_rule_id', None):
+                rule = getattr(subscription, 'opt_in_rule', None)
+                if rule and getattr(rule, 'short_link_id', None):
+                    link = getattr(rule, 'short_link', None)
+                    rule_for_keyword = rule
 
             if link is None:
                 link = fixed_link
 
-        # Resolve keyword for UTM and body: from rule when we have it, else try Path A/B for keyword only
+        # Resolve keyword for UTM and body: from rule when we have it, else from originating_subscription
         if rule_for_keyword:
             keyword_str = self._keyword_from_rule(rule_for_keyword)
         elif participant:
-            # e.g. fixed link used but we still want keyword for body/UTM
-            if getattr(participant, 'originating_sms_message_id', None):
-                msg = getattr(participant, 'originating_sms_message', None)
-                if msg and getattr(msg, 'rule_id', None):
-                    rule_for_keyword = getattr(msg, 'rule', None)
-            if not rule_for_keyword and getattr(participant, 'originating_subscriber_id', None):
-                subscriber = getattr(participant, 'originating_subscriber', None)
-                if subscriber:
-                    om = getattr(participant, 'originating_sms_message', None)
-                    sms_campaign = getattr(om, 'sms_campaign', None) if om else None
-                    if sms_campaign is None:
-                        sms_campaign = getattr(subscriber, 'sms_campaign', None)
-                    if sms_campaign:
-                        sub = (
-                            SmsSubscriberCampaignSubscription.objects
-                            .filter(subscriber=subscriber, campaign=sms_campaign)
-                            .select_related('opt_in_rule', 'opt_in_rule__keyword')
-                            .first()
-                        )
-                        if sub and getattr(sub, 'opt_in_rule_id', None):
-                            rule_for_keyword = getattr(sub, 'opt_in_rule', None)
+            subscription = getattr(participant, 'originating_subscription', None)
+            if subscription and getattr(subscription, 'opt_in_rule_id', None):
+                rule_for_keyword = getattr(subscription, 'opt_in_rule', None)
             keyword_str = self._keyword_from_rule(rule_for_keyword) if rule_for_keyword else ''
         else:
             keyword_str = ''
@@ -213,12 +170,10 @@ class BulkCampaignProcessor:
             'campaign',
             'participant',
             'participant__lead',
-            'participant__originating_sms_message',
-            'participant__originating_sms_message__rule',
-            'participant__originating_sms_message__rule__short_link',
-            'participant__originating_sms_message__rule__keyword',
-            'participant__originating_sms_message__sms_campaign',
-            'participant__originating_subscriber',
+            'participant__originating_subscription',
+            'participant__originating_subscription__opt_in_rule',
+            'participant__originating_subscription__opt_in_rule__short_link',
+            'participant__originating_subscription__opt_in_rule__keyword',
             'message_group',
             'drip_message_step',
             'drip_message_step__short_link',
@@ -358,12 +313,10 @@ class BulkCampaignProcessor:
             'campaign',
             'participant',
             'participant__lead',
-            'participant__originating_sms_message',
-            'participant__originating_sms_message__rule',
-            'participant__originating_sms_message__rule__short_link',
-            'participant__originating_sms_message__rule__keyword',
-            'participant__originating_sms_message__sms_campaign',
-            'participant__originating_subscriber',
+            'participant__originating_subscription',
+            'participant__originating_subscription__opt_in_rule',
+            'participant__originating_subscription__opt_in_rule__short_link',
+            'participant__originating_subscription__opt_in_rule__keyword',
             'message_group',
             'drip_message_step',
             'drip_message_step__short_link',
@@ -1132,6 +1085,14 @@ class BulkCampaignProcessor:
             if success:
                 # Update message status
                 message.update_status('sent')
+
+                # Persist Twilio SID on BulkCampaignMessage for reply tracking (ParentMessageSid lookup)
+                if campaign.channel == 'sms' and thread_message:
+                    twilio_msg = getattr(thread_message, 'twilio_message', None)
+                    twilio_sid = getattr(twilio_msg, 'message_sid', None) if twilio_msg else None
+                    if twilio_sid:
+                        message.provider_message_id = twilio_sid
+                        message.save(update_fields=['provider_message_id'])
                 
                 # Update participant progress
                 participant.update_campaign_progress(message_sent=True)

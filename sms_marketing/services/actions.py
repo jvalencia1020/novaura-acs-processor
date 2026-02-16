@@ -9,7 +9,13 @@ from external_models.models.messages import MessageTemplate
 from external_models.models.nurturing_campaigns import LeadNurturingCampaign, LeadNurturingParticipant
 from external_models.models.communications import Conversation, ConversationMessage
 from shared_services.lead_matching_service import LeadMatchingService
-from sms_marketing.models import SmsMessage, SmsSubscriber, SmsKeywordCampaign, SmsKeywordRule
+from sms_marketing.models import (
+    SmsMessage,
+    SmsSubscriber,
+    SmsKeywordCampaign,
+    SmsKeywordRule,
+    SmsSubscriberCampaignSubscription,
+)
 from sms_marketing.services.message_sender import SMSMarketingMessageSender
 
 logger = logging.getLogger(__name__)
@@ -92,7 +98,7 @@ class SMSMarketingActionExecutor:
         nurturing_participant = None
         if result['confirmed']:
             nurturing_participant = self._enroll_in_follow_up_nurturing_campaign_if_applicable(
-                campaign, subscriber, message
+                campaign, subscriber, message, rule=rule
             )
         
         # Send confirmation/welcome message
@@ -221,30 +227,46 @@ class SMSMarketingActionExecutor:
         except LeadNurturingCampaign.DoesNotExist:
             return ExecutionResult(False, 'error', {'error': 'Nurturing campaign not found'}, 'Nurturing campaign not found')
         
-        # Create participant (created_by_id is required by the DB; use nurturing campaign's creator)
         lead = subscriber.lead
         if not lead:
             return ExecutionResult(False, 'error', {'error': 'Subscriber has no linked lead'}, 'Subscriber has no linked lead')
         created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
         if not created_by_id:
             return ExecutionResult(False, 'error', {'error': 'Nurturing campaign has no created_by'}, 'Nurturing campaign has no created_by')
-        # Include DB-required fields that may be NOT NULL in the table (model allows null)
+
+        # Get or create campaign-level subscription so participant can link via originating_subscription
+        now = timezone.now()
+        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
+            subscriber=subscriber,
+            campaign=campaign,
+            defaults={
+                'status': 'opted_in',
+                'opted_in_at': now,
+                'opt_in_message': message,
+                'opt_in_rule': rule,
+            },
+        )
+        if subscription.opt_in_rule_id is None and rule is not None:
+            subscription.opt_in_rule = rule
+            subscription.save(update_fields=['opt_in_rule'])
+        if subscription.opt_in_message_id is None and message is not None:
+            subscription.opt_in_message = message
+            subscription.save(update_fields=['opt_in_message'])
+
         defaults = {
             'status': 'active',
-            'originating_sms_message': message,
-            'originating_subscriber': subscriber,
+            'originating_subscription': subscription,
             'created_by_id': created_by_id,
             'metadata': {},  # DB column is NOT NULL
         }
         participant, created = LeadNurturingParticipant.objects.get_or_create(
             lead=lead,
             nurturing_campaign=nurturing_campaign,
-            defaults=defaults
+            defaults=defaults,
         )
-        if not created and participant.originating_sms_message_id is None:
-            participant.originating_sms_message = message
-            participant.originating_subscriber = subscriber
-            participant.save(update_fields=['originating_sms_message_id', 'originating_subscriber_id'])
+        if not created and participant.originating_subscription_id is None:
+            participant.originating_subscription = subscription
+            participant.save(update_fields=['originating_subscription_id'])
         
         # Enqueue first step (this would trigger journey processor)
         # You may need to enqueue a task here to start the journey
@@ -376,11 +398,17 @@ class SMSMarketingActionExecutor:
         
         return lead
 
-    def _enroll_in_follow_up_nurturing_campaign_if_applicable(self, campaign, subscriber, message):
+    def _enroll_in_follow_up_nurturing_campaign_if_applicable(
+        self,
+        campaign,
+        subscriber,
+        message,
+        rule=None,
+    ):
         """
         If campaign has follow_up_nurturing_campaign and subscriber has a lead, create or get
-        LeadNurturingParticipant (drip/reminder/blast) with originating_sms_message and
-        originating_subscriber. Returns the participant or None.
+        LeadNurturingParticipant (drip/reminder/blast) with originating_subscription pointing to
+        the campaign-level opt-in subscription. Returns the participant or None.
         """
         nurturing_campaign = getattr(campaign, 'follow_up_nurturing_campaign', None)
         if not nurturing_campaign:
@@ -392,23 +420,44 @@ class SMSMarketingActionExecutor:
         created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
         if not created_by_id:
             return None
-        # Include DB-required fields that may be NOT NULL in the table (model allows null)
+
+        # Get or create the campaign-level subscription (state manager may have already created it)
+        now = timezone.now()
+        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
+            subscriber=subscriber,
+            campaign=campaign,
+            defaults={
+                'status': 'opted_in',
+                'opted_in_at': now,
+                'opt_in_message': message,
+                'opt_in_rule': rule,
+            },
+        )
+        # Ensure opt_in_rule and opt_in_message are set when we have them
+        update_sub = False
+        if rule is not None and subscription.opt_in_rule_id is None:
+            subscription.opt_in_rule = rule
+            update_sub = True
+        if message is not None and subscription.opt_in_message_id is None:
+            subscription.opt_in_message = message
+            update_sub = True
+        if update_sub:
+            subscription.save(update_fields=['opt_in_rule', 'opt_in_message'])
+
         defaults = {
             'status': 'active',
-            'originating_sms_message': message,
-            'originating_subscriber': subscriber,
+            'originating_subscription': subscription,
             'created_by_id': created_by_id,
             'metadata': {},  # DB column is NOT NULL
         }
         participant, created = LeadNurturingParticipant.objects.get_or_create(
             lead=lead,
             nurturing_campaign=nurturing_campaign,
-            defaults=defaults
+            defaults=defaults,
         )
-        if not created and participant.originating_sms_message_id is None:
-            participant.originating_sms_message = message
-            participant.originating_subscriber = subscriber
-            participant.save(update_fields=['originating_sms_message_id', 'originating_subscriber_id'])
+        if not created and participant.originating_subscription_id is None:
+            participant.originating_subscription = subscription
+            participant.save(update_fields=['originating_subscription_id'])
         return participant
 
     def _get_or_create_conversation(self, subscriber: SmsSubscriber, endpoint, lead=None):

@@ -526,6 +526,15 @@ class BulkCampaignMessage(models.Model):
         help_text="Override max retries for this message (uses campaign default if not set)"
     )
 
+    # Provider message id (e.g. Twilio SID) when this message was sent; used to match inbound replies
+    provider_message_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="Twilio (or other provider) message SID when this bulk message was sent; used to match inbound replies."
+    )
+
     class Meta:
         managed = False
         db_table = 'bulk_campaign_message'
@@ -962,23 +971,14 @@ class LeadNurturingParticipant(models.Model):
     )
     metadata = models.JSONField(blank=True, null=True)
 
-    # Attribution: link back to the SMS that triggered enrollment (e.g. START_JOURNEY)
-    # String refs to avoid circular import with sms_marketing.models.campaign
-    originating_sms_message = models.ForeignKey(
-        'sms_marketing.SmsMessage',
+    # Attribution: campaign-scoped opt-in that triggered enrollment (subscriber, campaign, rule, opt-in message)
+    originating_subscription = models.ForeignKey(
+        'sms_marketing.SmsSubscriberCampaignSubscription',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name='nurturing_participants_enrolled',
-        help_text='Inbound SMS that triggered enrollment in this nurturing campaign',
-    )
-    originating_subscriber = models.ForeignKey(
-        'sms_marketing.SmsSubscriber',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='nurturing_participations',
-        help_text='SMS subscriber who triggered enrollment (e.g. via START_JOURNEY)',
+        help_text='Campaign-level opt-in subscription that triggered enrollment (subscriber, campaign, opt_in_rule, opt_in_message).',
     )
 
     class Meta:
@@ -994,6 +994,7 @@ class LeadNurturingParticipant(models.Model):
             models.Index(fields=['next_scheduled_message']),
             models.Index(fields=['entered_campaign_at']),
             models.Index(fields=['exited_campaign_at']),
+            models.Index(fields=['originating_subscription']),
         ]
 
     def __str__(self):

@@ -5,7 +5,7 @@ from django.utils import timezone
 from communication_processor.services.base_processor import BaseChannelProcessor
 from communication_processor.models import CommunicationEvent
 from external_models.models.communications import ConversationMessage
-from external_models.models.nurturing_campaigns import LeadNurturingParticipant
+from external_models.models.nurturing_campaigns import BulkCampaignMessage, LeadNurturingParticipant
 from communication_processor.utils.message_sender import MessageSender
 
 from shared_services import (
@@ -128,8 +128,18 @@ class SMSProcessor(BaseChannelProcessor):
         
         # Only create conversation message if it doesn't exist and this is a message event
         if not conversation_message and event_type in ['message_received', 'message_sent']:
+            # Resolve bulk message for reply tracking (ParentMessageSid from Twilio)
+            parent_sid = event_data.get('ParentMessageSid') or event_data.get('parent_message_sid')
+            bulk_message = (
+                BulkCampaignMessage.objects.filter(provider_message_id=parent_sid).first()
+                if parent_sid else None
+            )
             conversation_message = self.conversation_service.create_conversation_message(
-                conversation, participant, event_data, 'sms'
+                conversation,
+                participant,
+                event_data,
+                'sms',
+                in_reply_to_bulk_campaign_message=bulk_message,
             )
         
         # Use shared service to find associated nurturing campaign

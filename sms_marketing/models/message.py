@@ -1,6 +1,6 @@
 from django.db import models
 from external_models.models.communications import ContactEndpoint, Conversation, ConversationMessage
-from external_models.models.nurturing_campaigns import LeadNurturingCampaign
+from external_models.models.nurturing_campaigns import LeadNurturingCampaign, BulkCampaignMessage
 from external_models.models.external_references import Account
 
 
@@ -234,6 +234,14 @@ class SmsMessage(models.Model):
         blank=True,
         related_name='messages',
         help_text='Subscriber this message is from/to'
+    )
+    in_reply_to_bulk_campaign_message = models.ForeignKey(
+        BulkCampaignMessage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='inbound_replies',
+        help_text='The bulk campaign message (drip/reminder/blast) this inbound is replying to.',
     )
 
     # Optional conversation links for agent replies and threading

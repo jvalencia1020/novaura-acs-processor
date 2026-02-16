@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 from django.utils import timezone
 from django.db import transaction
 from external_models.models.communications import ContactEndpoint
+from external_models.models.nurturing_campaigns import BulkCampaignMessage
 from sms_marketing.models import SmsMessage, SmsSubscriber, SmsCampaignEvent, SmsKeywordCampaign
 from sms_marketing.services.router import SMSMarketingRouter
 from sms_marketing.services.state import SMSMarketingStateManager
@@ -59,7 +60,15 @@ class SMSMarketingProcessor:
             
             # Set processing status to 'processing' when we start
             message.processing_status = 'processing'
-            message.save(update_fields=['processing_status'])
+            # Resolve in_reply_to_bulk_campaign_message from ParentMessageSid (webhook sends as parent_message_sid)
+            if not message.in_reply_to_bulk_campaign_message_id:
+                bulk_message = self._resolve_in_reply_to_bulk_message(message_data, message)
+                if bulk_message:
+                    message.in_reply_to_bulk_campaign_message = bulk_message
+            update_fields = ['processing_status']
+            if message.in_reply_to_bulk_campaign_message_id is not None:
+                update_fields.append('in_reply_to_bulk_campaign_message_id')
+            message.save(update_fields=update_fields)
             
             # Get endpoint
             endpoint = message.endpoint
@@ -104,18 +113,18 @@ class SMSMarketingProcessor:
 
                 for campaign in campaigns:
                     if self.state_manager.is_confirmation_keyword(keyword_candidate, campaign):
-                        # Complete double opt-in
-                        self.state_manager.handle_double_opt_in_confirmation(subscriber, campaign)
-                        # Find the rule that triggered the opt-in (for action_config and welcome message)
+                        # Find the rule that triggered the opt-in (for subscription attribution and welcome message)
                         rule = campaign.rules.filter(
                             keyword__keyword__iexact=subscriber.opt_in_keyword
                         ).first()
+                        # Complete double opt-in (pass rule so subscription gets opt_in_rule)
+                        self.state_manager.handle_double_opt_in_confirmation(subscriber, campaign, rule=rule)
                         action_config = (rule.action_config or {}) if rule else {}
                         # Link/create lead so we can enroll in follow-up nurturing campaign
                         self.action_executor._link_or_create_lead(subscriber, campaign, action_config)
                         # Enroll in follow-up nurturing campaign (drip/reminder/blast) if linked
                         self.action_executor._enroll_in_follow_up_nurturing_campaign_if_applicable(
-                            campaign, subscriber, message
+                            campaign, subscriber, message, rule=rule
                         )
                         if rule:
                             self.action_executor._send_welcome_message(campaign, rule, subscriber, action_config)
@@ -315,6 +324,18 @@ class SMSMarketingProcessor:
                 pass
             return False
     
+    def _resolve_in_reply_to_bulk_message(
+        self, message_data: Dict[str, Any], message: SmsMessage
+    ) -> Optional[BulkCampaignMessage]:
+        """
+        Resolve the BulkCampaignMessage this inbound is replying to (for tracking keyword/link).
+        Uses parent_message_sid (Twilio ParentMessageSid) from payload when provided by webhook.
+        """
+        parent_sid = message_data.get('parent_message_sid') or message_data.get('ParentMessageSid')
+        if not parent_sid:
+            return None
+        return BulkCampaignMessage.objects.filter(provider_message_id=parent_sid).first()
+
     def _create_message_from_payload(self, message_data: Dict[str, Any]) -> SmsMessage:
         """Create SmsMessage from SQS payload (fallback)"""
         # This should rarely be needed if webhook creates message first

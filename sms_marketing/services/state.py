@@ -81,6 +81,7 @@ class SMSMarketingStateManager:
                     'status': 'opted_in',
                     'opted_in_at': now,
                     'opt_in_message': message,
+                    'opt_in_rule': rule,
                 },
             )
             if sub.status == 'opted_out':
@@ -89,7 +90,9 @@ class SMSMarketingStateManager:
             sub.status = 'opted_in'
             sub.opted_in_at = now
             sub.opt_in_message = message
-            sub.save(update_fields=['status', 'opted_in_at', 'opt_in_message', 'opted_out_at', 'opt_out_message'])
+            if rule is not None:
+                sub.opt_in_rule = rule
+            sub.save(update_fields=['status', 'opted_in_at', 'opt_in_message', 'opted_out_at', 'opt_out_message'] + (['opt_in_rule'] if rule is not None else []))
             return {'status': 'opted_in', 'confirmed': True}
 
         elif opt_in_mode == 'double':
@@ -111,6 +114,7 @@ class SMSMarketingStateManager:
                     'status': 'pending_opt_in',
                     'opted_in_at': now,
                     'opt_in_message': message,
+                    'opt_in_rule': rule,
                 },
             )
             if sub.status == 'opted_out':
@@ -119,17 +123,25 @@ class SMSMarketingStateManager:
             sub.status = 'pending_opt_in'
             sub.opted_in_at = now
             sub.opt_in_message = message  # Always the initial START message that triggered the flow
-            sub.save(update_fields=['status', 'opted_in_at', 'opt_in_message', 'opted_out_at', 'opt_out_message'])
+            if rule is not None:
+                sub.opt_in_rule = rule
+            sub.save(update_fields=['status', 'opted_in_at', 'opt_in_message', 'opted_out_at', 'opt_out_message'] + (['opt_in_rule'] if rule is not None else []))
             return {'status': 'pending_opt_in', 'confirmed': False}
 
         return {'status': subscriber.status, 'confirmed': False}
     
     @transaction.atomic
-    def handle_double_opt_in_confirmation(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign) -> bool:
+    def handle_double_opt_in_confirmation(
+        self,
+        subscriber: SmsSubscriber,
+        campaign: SmsKeywordCampaign,
+        rule=None,
+    ) -> bool:
         """
         Complete double opt-in confirmation (subscriber replied YES).
         Updates both the subscriber and the per-campaign subscription.
         opt_in_message stays the initial START message; opted_in_at can reflect confirmation time.
+        If rule is provided, sets opt_in_rule on the subscription for attribution.
         """
         if subscriber.status != 'pending_opt_in':
             logger.warning(f"Subscriber {subscriber.id} not in pending_opt_in state")
@@ -146,17 +158,22 @@ class SMSMarketingStateManager:
             sub = SmsSubscriberCampaignSubscription.objects.get(subscriber=subscriber, campaign=campaign)
             sub.status = 'opted_in'
             sub.opted_in_at = now  # When they confirmed (opt_in_message remains the START message)
-            sub.save(update_fields=['status', 'opted_in_at'])
+            if rule is not None:
+                sub.opt_in_rule = rule
+            sub.save(update_fields=['status', 'opted_in_at'] + (['opt_in_rule'] if rule is not None else []))
         except SmsSubscriberCampaignSubscription.DoesNotExist:
             logger.warning(
                 f"No SmsSubscriberCampaignSubscription for subscriber={subscriber.id} campaign={campaign.id}; creating"
             )
-            SmsSubscriberCampaignSubscription.objects.create(
-                subscriber=subscriber,
-                campaign=campaign,
-                status='opted_in',
-                opted_in_at=now,
-            )
+            create_kw = {
+                'subscriber': subscriber,
+                'campaign': campaign,
+                'status': 'opted_in',
+                'opted_in_at': now,
+            }
+            if rule is not None:
+                create_kw['opt_in_rule'] = rule
+            SmsSubscriberCampaignSubscription.objects.create(**create_kw)
         return True
     
     @transaction.atomic

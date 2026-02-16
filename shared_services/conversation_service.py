@@ -90,17 +90,25 @@ class ConversationService:
             }
             return Participant.objects.create(**participant_data)
     
-    def create_conversation_message(self, conversation: Conversation, participant: Participant, 
-                                  event_data: Dict[str, Any], channel: str = 'sms') -> ConversationMessage:
+    def create_conversation_message(
+        self,
+        conversation: Conversation,
+        participant: Participant,
+        event_data: Dict[str, Any],
+        channel: str = 'sms',
+        in_reply_to_bulk_campaign_message=None,
+    ) -> ConversationMessage:
         """
         Create a conversation message from the event data.
-        
+
         Args:
             conversation: The conversation
             participant: The participant
             event_data: The event data
             channel: The communication channel
-            
+            in_reply_to_bulk_campaign_message: Optional BulkCampaignMessage when this
+                inbound is a reply to a bulk SMS (for tracking keyword/link attribution).
+
         Returns:
             ConversationMessage object
         """
@@ -118,9 +126,11 @@ class ConversationService:
             'num_segments': event_data.get('NumSegments', 1),
             'num_media': event_data.get('NumMedia', 0),
             'channel': channel,
-            'raw_data': event_data
+            'raw_data': event_data,
         }
-        
+        if in_reply_to_bulk_campaign_message is not None:
+            message_data['in_reply_to_bulk_campaign_message'] = in_reply_to_bulk_campaign_message
+
         return ConversationMessage.objects.create(**message_data)
     
     def update_conversation_status(self, conversation: Conversation, status: str) -> bool:

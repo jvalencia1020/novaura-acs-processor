@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from external_models.models.external_references import Lead, Account, Campaign, Funnel
 from external_models.models.messages import MessageTemplate
 from external_models.models.reporting import BlandAICall
+# BulkCampaignMessage: use string ref below to avoid circular import (communications <- channel_configs <- nurturing_campaigns)
 
 
 class Conversation(models.Model):
@@ -203,6 +204,15 @@ class ConversationMessage(models.Model):
         blank=True,
         null=True,
         help_text="Channel of communication used for this message."
+    )
+
+    in_reply_to_bulk_campaign_message = models.ForeignKey(
+        'external_models.BulkCampaignMessage',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='conversation_replies',
+        help_text="The bulk campaign message this conversation message is replying to (when from nurturing follow-up).",
     )
 
     # Store the complete raw message data

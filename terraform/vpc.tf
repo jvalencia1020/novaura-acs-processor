@@ -166,22 +166,29 @@ resource "aws_vpc_endpoint" "s3" {
   }
 }
 
-# Security group for VPC endpoints
+# Security group for VPC endpoints (no inline ingress — all rules are aws_security_group_rule
+# to avoid Terraform repeatedly trying to "fix" the SG when inline + standalone rules are mixed).
 resource "aws_security_group" "vpc_endpoints" {
   name        = "novaura-acs-vpc-endpoints"
   description = "Security group for VPC endpoints"
   vpc_id      = data.aws_vpc.existing.id
 
-  ingress {
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs_service.id]
-  }
-
   tags = {
     Name = "novaura-acs-vpc-endpoints-sg"
   }
+}
+
+# Allow this project's ECS tasks to reach VPC endpoints (ECR, Secrets Manager, etc.).
+# If you get InvalidPermission.Duplicate (rule already exists from a previous inline block),
+# import it: terraform import 'aws_security_group_rule.vpc_endpoints_from_ecs' '<vpc_endpoints_sg_id>_ingress_tcp_443_443_<ecs_service_sg_id>'
+resource "aws_security_group_rule" "vpc_endpoints_from_ecs" {
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.ecs_service.id
+  security_group_id        = aws_security_group.vpc_endpoints.id
+  description              = "Allow HTTPS from Novaura ACS ECS tasks to VPC endpoint"
 }
 
 # ---------------------------------------------------------------------------
