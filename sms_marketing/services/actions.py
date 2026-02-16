@@ -288,16 +288,22 @@ class SMSMarketingActionExecutor:
     
     def _handle_create_lead(self, campaign, rule, subscriber, message, action_config):
         """Handle CREATE_LEAD action"""
-        lead_data = action_config.get('lead_data', {})
-        
-        # Create lead
+        lead_data = dict(action_config.get('lead_data', {}))
+        # Lead model uses campaign (CRM Campaign), not account
+        crm_campaign = campaign.get_primary_crm_campaign() or campaign.crm_campaigns.first()
+        if not crm_campaign:
+            return ExecutionResult(
+                False, 'error',
+                {'error': 'Campaign has no linked CRM campaign; cannot create lead'},
+                'Campaign has no linked CRM campaign'
+            )
+        lead_data.setdefault('campaign', crm_campaign)
+        lead_data.setdefault('phone_number', subscriber.phone_number)
+        # Remove account if caller passed it; Lead has no account field
+        lead_data.pop('account', None)
+
         from external_models.models.external_references import Lead
-        
-        lead = Lead.objects.create(
-            phone_number=subscriber.phone_number,
-            account=campaign.account,
-            **lead_data
-        )
+        lead = Lead.objects.create(**lead_data)
         
         # Link to subscriber
         subscriber.lead = lead
@@ -389,11 +395,18 @@ class SMSMarketingActionExecutor:
         lead = self.lead_matching.get_lead_by_phone(subscriber.phone_number)
         
         if not lead and action_config.get('create_lead_if_missing'):
-            # Create new lead
+            # Create new lead (Lead model requires CRM campaign, not account)
             from external_models.models.external_references import Lead
+            crm_campaign = campaign.get_primary_crm_campaign() or campaign.crm_campaigns.first()
+            if not crm_campaign:
+                logger.warning(
+                    "Cannot create lead for subscriber %s: SmsKeywordCampaign %s has no CRM campaign",
+                    subscriber.phone_number, campaign.id
+                )
+                return None
             lead = Lead.objects.create(
                 phone_number=subscriber.phone_number,
-                account=campaign.account
+                campaign=crm_campaign
             )
         
         if lead:
