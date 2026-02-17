@@ -22,6 +22,10 @@ class BlastCampaignSchedule(CampaignScheduleBase):
         related_name='blast_campaign_schedules',
         help_text='Optional short link to include in the blast message (processor plugs this into the outbound message).',
     )
+    use_opt_in_rule_link = models.BooleanField(
+        default=False,
+        help_text='If True, the message processor should use the short link from the SMS keyword rule that opted in the subscriber (e.g. participant.originating_subscription.opt_in_rule.short_link) instead of the fixed short_link above.',
+    )
 
     class Meta:
         managed = False

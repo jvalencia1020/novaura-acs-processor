@@ -69,11 +69,11 @@ class BulkCampaignProcessor:
     def _resolve_link_for_bulk_message(self, message, campaign):
         """
         Resolve the Link and opt-in keyword for a drip, reminder, or blast message.
-        Drip/Reminder: When use_opt_in_rule_link is True, prefer opt-in rule link (Path A then Path B),
-        then fallback to step/reminder short_link. When False, use the step's/reminder's short_link only.
-        Blast: No fixed short_link on schedule; use opt-in rule link (Path A then Path B) when available.
-        Keyword is resolved from the same rule used for the link when available, or from Path A/B when
-        participant exists (for body {{keyword.keyword}} and UTM ${keyword}).
+        Drip/Reminder/Blast: When use_opt_in_rule_link is True, prefer opt-in rule link from
+        participant.originating_subscription.opt_in_rule.short_link (and keyword from that rule),
+        then fallback to the step's/reminder's/schedule's fixed short_link. When False, use the
+        fixed short_link only. Keyword is resolved from the rule used for the link when available,
+        or from originating_subscription.opt_in_rule when participant exists (for {{keyword.keyword}} and UTM).
         Returns (link, drip_step_id, reminder_message_id, blast_schedule_id, keyword_str).
         """
         drip_step_id = None
@@ -97,8 +97,10 @@ class BulkCampaignProcessor:
             if schedule:
                 blast_schedule_id = schedule.id
                 fixed_link = getattr(schedule, 'short_link', None) if getattr(schedule, 'short_link_id', None) else None
-            # When schedule has short_link use it; otherwise fall back to opt-in rule link
-            use_opt_in = fixed_link is None
+                # Same as drip/reminder: explicit flag to use participant's opt-in rule link and keyword
+                use_opt_in = getattr(schedule, 'use_opt_in_rule_link', False)
+            else:
+                use_opt_in = False
         else:
             return (None, None, None, None, '')
 
