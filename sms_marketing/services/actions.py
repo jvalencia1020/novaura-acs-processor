@@ -145,12 +145,15 @@ class SMSMarketingActionExecutor:
         )
     
     def _handle_help(self, campaign, rule, subscriber, message, action_config):
-        """Handle HELP action"""
+        """Handle HELP action. Endpoint first, then action_config, campaign, program, default."""
+        endpoint = getattr(subscriber, 'endpoint', None)
+        sms_settings = getattr(endpoint, 'sms_settings', None) if endpoint else None
         help_text = (
-            action_config.get('help_text') or
-            getattr(campaign, 'help_text', None) or
-            (getattr(campaign, 'program', None).help_text if getattr(campaign, 'program', None) else None) or
-            "Reply STOP to opt out. Reply HELP for more information."
+            (getattr(sms_settings, 'help_message', None) if sms_settings else None)
+            or action_config.get('help_text')
+            or getattr(campaign, 'help_text', None)
+            or (getattr(campaign.program, 'help_text', None) if getattr(campaign, 'program', None) else None)
+            or "Reply STOP to opt out. Reply HELP for more information."
         )
 
         # Send help message (apply variable replacement for plain text too)
@@ -636,10 +639,13 @@ class SMSMarketingActionExecutor:
         self._send_message(subscriber, campaign, confirmation_text, rule=rule, message_type='confirmation')
     
     def _send_opt_out_confirmation(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign):
-        """Send opt-out confirmation"""
+        """Send opt-out confirmation. Endpoint first, then campaign, then default."""
+        endpoint = getattr(subscriber, 'endpoint', None)
+        sms_settings = getattr(endpoint, 'sms_settings', None) if endpoint else None
         opt_out_text = (
-            getattr(campaign, 'opt_out_message', None) or
-            "You have been unsubscribed. You will no longer receive messages."
+            (getattr(sms_settings, 'stop_message', None) if sms_settings else None)
+            or getattr(campaign, 'opt_out_message', None)
+            or "You have been unsubscribed. You will no longer receive messages."
         )
         self._send_message(subscriber, campaign, opt_out_text, message_type='opt_out')
 

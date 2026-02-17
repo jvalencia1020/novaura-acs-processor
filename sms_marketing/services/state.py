@@ -5,6 +5,9 @@ import logging
 from typing import Optional, Dict
 from django.utils import timezone
 from django.db import transaction
+from django.core.exceptions import ValidationError
+
+from external_models.models.nurturing_campaigns import LeadNurturingParticipant
 from sms_marketing.models import (
     SmsSubscriber,
     SmsKeywordCampaign,
@@ -237,7 +240,47 @@ class SMSMarketingStateManager:
                 status='opted_out', opted_out_at=now
             )
 
+        # Opt out of all lead nurturing campaigns this subscriber is in (drip/reminder/blast/nurturing)
+        self._opt_out_nurturing_participants(subscriber)
+
         return {'was_opted_in': was_opted_in}
+
+    def _opt_out_nurturing_participants(self, subscriber: SmsSubscriber) -> None:
+        """
+        Find all active/paused LeadNurturingParticipant for this subscriber (by lead and/or
+        originating_subscription) and call opt_out() on each. Logs and continues on errors.
+        """
+        from django.db.models import Q
+
+        q = Q(originating_subscription__subscriber=subscriber)
+        if subscriber.lead_id:
+            q = q | Q(lead=subscriber.lead)
+        participants_qs = LeadNurturingParticipant.objects.filter(
+            status__in=['active', 'paused']
+        ).filter(q).distinct()
+
+        for participant in participants_qs:
+            try:
+                participant.opt_out()
+                logger.info(
+                    "Opted out nurturing participant id=%s (campaign id=%s) for subscriber id=%s",
+                    participant.id,
+                    participant.nurturing_campaign_id,
+                    subscriber.id,
+                )
+            except ValidationError as e:
+                logger.warning(
+                    "Could not opt out nurturing participant id=%s: %s",
+                    participant.id,
+                    e,
+                )
+            except Exception as e:
+                logger.exception(
+                    "Error opting out nurturing participant id=%s for subscriber id=%s: %s",
+                    participant.id,
+                    subscriber.id,
+                    e,
+                )
     
     def is_confirmation_keyword(self, keyword: str, campaign: SmsKeywordCampaign) -> bool:
         """Check if keyword is a confirmation keyword for double opt-in"""

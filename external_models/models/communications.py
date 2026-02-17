@@ -576,6 +576,17 @@ class ContactEndpointSmsSettings(models.Model):
         related_name='contact_endpoint_not_opted_in_default_sms_settings',
         help_text="ACS SMS template to render as default reply when sender is not opted in",
     )
+    # Endpoint-level compliance messages (used when no campaign/rule override is set).
+    stop_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Message sent when user texts STOP (opt-out confirmation). Used as endpoint default if campaign does not set one.',
+    )
+    help_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Message sent when user texts HELP. Used as endpoint default if campaign/rule do not set one.',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

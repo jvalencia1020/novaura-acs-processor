@@ -74,10 +74,11 @@ class BulkCampaignProcessor:
         Blast: No fixed short_link on schedule; use opt-in rule link (Path A then Path B) when available.
         Keyword is resolved from the same rule used for the link when available, or from Path A/B when
         participant exists (for body {{keyword.keyword}} and UTM ${keyword}).
-        Returns (link, drip_step_id, reminder_message_id, keyword_str).
+        Returns (link, drip_step_id, reminder_message_id, blast_schedule_id, keyword_str).
         """
         drip_step_id = None
         reminder_message_id = None
+        blast_schedule_id = None
         fixed_link = None
         use_opt_in = False
 
@@ -92,10 +93,14 @@ class BulkCampaignProcessor:
             fixed_link = getattr(rem, 'short_link', None) if getattr(rem, 'short_link_id', None) else None
             use_opt_in = getattr(rem, 'use_opt_in_rule_link', False)
         elif campaign.campaign_type == 'blast':
-            # Blast has no step/reminder short_link; use opt-in rule link only (Path A then B)
-            use_opt_in = True
+            schedule = getattr(campaign, 'blast_schedule', None)
+            if schedule:
+                blast_schedule_id = schedule.id
+                fixed_link = getattr(schedule, 'short_link', None) if getattr(schedule, 'short_link_id', None) else None
+            # When schedule has short_link use it; otherwise fall back to opt-in rule link
+            use_opt_in = fixed_link is None
         else:
-            return (None, None, None, '')
+            return (None, None, None, None, '')
 
         participant = getattr(message, 'participant', None)
         link = fixed_link if not use_opt_in else None
@@ -124,7 +129,7 @@ class BulkCampaignProcessor:
         else:
             keyword_str = ''
 
-        return (link, drip_step_id, reminder_message_id, keyword_str)
+        return (link, drip_step_id, reminder_message_id, blast_schedule_id, keyword_str)
 
     def process_campaign(self, campaign):
         """
@@ -168,6 +173,8 @@ class BulkCampaignProcessor:
             campaign__status__in=['active', 'scheduled']  # Only include messages from active or scheduled campaigns
         ).select_related(
             'campaign',
+            'campaign__blast_schedule',
+            'campaign__blast_schedule__short_link',
             'participant',
             'participant__lead',
             'participant__originating_subscription',
@@ -311,6 +318,8 @@ class BulkCampaignProcessor:
             campaign__status__in=['active', 'scheduled']
         ).select_related(
             'campaign',
+            'campaign__blast_schedule',
+            'campaign__blast_schedule__short_link',
             'participant',
             'participant__lead',
             'participant__originating_subscription',
@@ -946,7 +955,7 @@ class BulkCampaignProcessor:
 
             # Get message content (with optional short link and keyword for drip/reminder/blast)
             extra_context = None
-            link, drip_step_id, reminder_message_id, keyword_str = self._resolve_link_for_bulk_message(message, campaign)
+            link, drip_step_id, reminder_message_id, blast_schedule_id, keyword_str = self._resolve_link_for_bulk_message(message, campaign)
             if link is not None:
                 acs_context = {
                     'lead': message.participant.lead,
@@ -973,6 +982,8 @@ class BulkCampaignProcessor:
                         logger.error("Aborting send: failed to publish short link for drip step %s", drip_step_id)
                     elif reminder_message_id is not None:
                         logger.error("Aborting send: failed to publish short link for reminder message %s", reminder_message_id)
+                    elif blast_schedule_id is not None:
+                        logger.error("Aborting send: failed to publish short link for blast schedule %s", blast_schedule_id)
                     else:
                         logger.error("Aborting send: failed to publish short link for blast message %s", message.id)
                     return False
@@ -980,6 +991,7 @@ class BulkCampaignProcessor:
                     link,
                     drip_step_id=drip_step_id,
                     reminder_message_id=reminder_message_id,
+                    blast_schedule_id=blast_schedule_id,
                 )
                 # Set link and keyword so {{link.short_link}} and {{keyword.keyword}} resolve
                 extra_context = {

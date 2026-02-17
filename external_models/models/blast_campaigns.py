@@ -14,6 +14,14 @@ class BlastCampaignSchedule(CampaignScheduleBase):
         blank=True,
         help_text="Timezone for blast scheduling (defaults to CRM campaign timezone)"
     )
+    short_link = models.ForeignKey(
+        'link_tracking.Link',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='blast_campaign_schedules',
+        help_text='Optional short link to include in the blast message (processor plugs this into the outbound message).',
+    )
 
     class Meta:
         managed = False

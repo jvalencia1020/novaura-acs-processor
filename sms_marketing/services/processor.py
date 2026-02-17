@@ -387,11 +387,13 @@ class SMSMarketingProcessor:
         message.processed_at = timezone.now()
         message.save(update_fields=['subscriber', 'sms_campaign', 'processing_status', 'processed_at'])
         
-        # Send opt-out confirmation
+        # Send opt-out confirmation: endpoint first, then campaign, then default
+        sms_settings = getattr(endpoint, 'sms_settings', None)
         opt_out_text = (
-            getattr(campaign_context, 'opt_out_message', None)
-            if campaign_context else None
-        ) or "You have been unsubscribed. You will no longer receive messages."
+            (getattr(sms_settings, 'stop_message', None) if sms_settings else None)
+            or (getattr(campaign_context, 'opt_out_message', None) if campaign_context else None)
+            or "You have been unsubscribed. You will no longer receive messages."
+        )
         self.action_executor._send_message(
             subscriber=subscriber,
             campaign=campaign_context,
@@ -416,12 +418,14 @@ class SMSMarketingProcessor:
     def _handle_global_help(self, subscriber: SmsSubscriber, message: SmsMessage, endpoint: ContactEndpoint) -> bool:
         """Handle global HELP command"""
         campaign_context = self._get_campaign_context_for_global_command(endpoint, message)
+        # Endpoint first, then campaign, then program, then default
+        sms_settings = getattr(endpoint, 'sms_settings', None)
         help_text = (
-            getattr(campaign_context, 'help_text', None)
-            if campaign_context else None
-        ) or (
-            (campaign_context.program.help_text if campaign_context and campaign_context.program else None)
-        ) or "Reply STOP to opt out. Reply HELP for more information."
+            (getattr(sms_settings, 'help_message', None) if sms_settings else None)
+            or (getattr(campaign_context, 'help_text', None) if campaign_context else None)
+            or (campaign_context.program.help_text if campaign_context and getattr(campaign_context, 'program', None) else None)
+            or "Reply STOP to opt out. Reply HELP for more information."
+        )
 
         self.action_executor._send_message(
             subscriber=subscriber,
