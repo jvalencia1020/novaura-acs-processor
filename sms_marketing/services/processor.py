@@ -300,6 +300,22 @@ class SMSMarketingProcessor:
 
             # Mark as processed if successful
             if result.success:
+                # Send outbound message when OPT_IN returns one (welcome or confirmation)
+                outbound = result.data.get('outbound_message')
+                if outbound and event_type == 'OPT_IN':
+                    body = outbound.get('body')
+                    msg_type = outbound.get('message_type', 'welcome')
+                    if body:
+                        # Pass context when rule has short_link so {{link.short_link}} is resolved
+                        ctx = {} if (route_result.rule and getattr(route_result.rule, 'short_link_id', None)) else None
+                        self.message_sender.send_message(
+                            subscriber=subscriber,
+                            campaign=route_result.campaign,
+                            body=body,
+                            rule=route_result.rule,
+                            message_type=msg_type,
+                            context=ctx,
+                        )
                 message.processing_status = 'processed'  # Use 'processed' not 'completed'
                 message.processed_at = timezone.now()
                 message.save(update_fields=['processing_status', 'processed_at'])

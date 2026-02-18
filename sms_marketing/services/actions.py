@@ -1,31 +1,755 @@
 """
-Action execution service for SMS marketing keyword rules.
-
-This module provides handlers for executing different action types when keywords are matched.
-Each action handler updates subscriber state, creates events, and enqueues downstream tasks.
+Action execution handlers for SMS marketing campaigns.
 """
 import logging
-from typing import Dict, Any, Optional, Tuple, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from external_models.models.external_references import Lead
+from typing import Dict, Any, Optional
 from django.utils import timezone
 from django.db import transaction
-
-from ..models import (
+from external_models.models.messages import MessageTemplate
+from external_models.models.nurturing_campaigns import LeadNurturingCampaign, LeadNurturingParticipant
+from external_models.models.communications import Conversation, ConversationMessage
+from shared_services.lead_matching_service import LeadMatchingService
+from sms_marketing.models import (
+    SmsMessage,
+    SmsSubscriber,
     SmsKeywordCampaign,
     SmsKeywordRule,
-    SmsSubscriber,
     SmsSubscriberCampaignSubscription,
-    SmsMessage,
-    SmsCampaignEvent,
 )
+from sms_marketing.services.message_sender import SMSMarketingMessageSender
 
 logger = logging.getLogger(__name__)
 
 
+class ExecutionResult:
+    """Result of action execution"""
+    def __init__(self, success: bool, event_type: str, payload: Dict[str, Any], error: Optional[str] = None):
+        self.success = success
+        self.event_type = event_type
+        self.payload = payload
+        self.error = error
+
+
+class SMSMarketingActionExecutor:
+    """Executes actions for SMS marketing campaigns"""
+    
+    def __init__(self):
+        self.message_sender = SMSMarketingMessageSender()
+        self.lead_matching = LeadMatchingService()
+    
+    def execute_action(
+        self,
+        campaign: SmsKeywordCampaign,
+        rule: SmsKeywordRule,
+        subscriber: SmsSubscriber,
+        message: SmsMessage,
+        action_config: Dict[str, Any]
+    ) -> ExecutionResult:
+        """Execute action based on rule.action_type"""
+        action_type = rule.action_type
+        
+        try:
+            if action_type == 'OPT_IN':
+                return self._handle_opt_in(campaign, rule, subscriber, message, action_config)
+            elif action_type == 'OPT_OUT':
+                return self._handle_opt_out(campaign, rule, subscriber, message, action_config)
+            elif action_type == 'HELP':
+                return self._handle_help(campaign, rule, subscriber, message, action_config)
+            elif action_type == 'SEND_TEMPLATE':
+                return self._handle_send_template(campaign, rule, subscriber, message, action_config)
+            elif action_type == 'START_JOURNEY':
+                return self._handle_start_journey(campaign, rule, subscriber, message, action_config)
+            elif action_type == 'CREATE_LEAD':
+                return self._handle_create_lead(campaign, rule, subscriber, message, action_config)
+            elif action_type == 'ROUTE_TO_AGENT':
+                return self._handle_route_to_agent(campaign, rule, subscriber, message, action_config)
+            elif action_type == 'COMPOSITE':
+                return self._handle_composite(campaign, rule, subscriber, message, action_config)
+            else:
+                return ExecutionResult(
+                    False,
+                    'error',
+                    {'error': f'Unknown action type: {action_type}'},
+                    f'Unknown action type: {action_type}'
+                )
+        except Exception as e:
+            logger.exception(f"Error executing action {action_type}: {e}")
+            return ExecutionResult(
+                False,
+                'error',
+                {'error': str(e)},
+                str(e)
+            )
+    
+    def _handle_opt_in(self, campaign, rule, subscriber, message, action_config):
+        """Handle OPT_IN action"""
+        from sms_marketing.services.state import SMSMarketingStateManager
+        state_manager = SMSMarketingStateManager()
+        
+        keyword = rule.keyword.keyword
+        result = state_manager.handle_opt_in(
+            subscriber, campaign, rule, campaign.opt_in_mode, keyword, message=message
+        )
+        
+        # Link lead if available
+        lead = self._link_or_create_lead(subscriber, campaign, action_config)
+        
+        # When opt-in is confirmed, enroll in follow-up nurturing campaign if linked (drip/reminder/blast)
+        nurturing_participant = None
+        if result['confirmed']:
+            nurturing_participant = self._enroll_in_follow_up_nurturing_campaign_if_applicable(
+                campaign, subscriber, message, rule=rule
+            )
+        
+        # Send confirmation/welcome message
+        if result['confirmed']:
+            # Single opt-in: send welcome message
+            self._send_welcome_message(campaign, rule, subscriber, action_config)
+        else:
+            # Double opt-in: send confirmation request
+            self._send_confirmation_request(campaign, rule, subscriber, action_config)
+        
+        payload = {
+            'campaign_id': campaign.id,
+            'rule_id': rule.id,
+            'opt_in_mode': campaign.opt_in_mode,
+            'opt_in_keyword': keyword,
+            'confirmed': result['confirmed'],
+            'lead_linked': lead is not None,
+            'lead_id': lead.id if lead else None
+        }
+        if nurturing_participant:
+            payload['nurturing_participant_id'] = nurturing_participant.id
+            payload['nurturing_campaign_id'] = nurturing_participant.nurturing_campaign_id
+        return ExecutionResult(True, 'opt_in', payload)
+
+    def _handle_opt_out(self, campaign, rule, subscriber, message, action_config):
+        """Handle OPT_OUT action"""
+        from sms_marketing.services.state import SMSMarketingStateManager
+        state_manager = SMSMarketingStateManager()
+        
+        keyword = rule.keyword.keyword if rule else 'STOP'
+        result = state_manager.handle_opt_out(subscriber, keyword, message=message, campaign=campaign)
+        
+        # Send opt-out confirmation
+        self._send_opt_out_confirmation(subscriber, campaign)
+        
+        return ExecutionResult(
+            True,
+            'opt_out',
+            {
+                'opt_out_source': 'keyword',
+                'opt_out_keyword': keyword,
+                'was_opted_in': result['was_opted_in']
+            }
+        )
+    
+    def _handle_help(self, campaign, rule, subscriber, message, action_config):
+        """Handle HELP action. Endpoint first, then action_config, campaign, program, default."""
+        endpoint = getattr(subscriber, 'endpoint', None)
+        sms_settings = getattr(endpoint, 'sms_settings', None) if endpoint else None
+        help_text = (
+            (getattr(sms_settings, 'help_message', None) if sms_settings else None)
+            or action_config.get('help_text')
+            or getattr(campaign, 'help_text', None)
+            or (getattr(campaign.program, 'help_text', None) if getattr(campaign, 'program', None) else None)
+            or "Reply STOP to opt out. Reply HELP for more information."
+        )
+
+        # Send help message (apply variable replacement for plain text too)
+        success, sms_message = self._send_message(
+            subscriber=subscriber,
+            campaign=campaign,
+            body=help_text,
+            rule=rule,
+            message_type='help'
+        )
+        
+        return ExecutionResult(
+            success,
+            'message_sent' if success else 'error',
+            {
+                'message_type': 'help',
+                'help_text': help_text,
+                'sms_message_id': sms_message.id if sms_message else None
+            },
+            error=None if success else 'Failed to send help message'
+        )
+    
+    def _handle_send_template(self, campaign, rule, subscriber, message, action_config):
+        """Handle SEND_TEMPLATE action"""
+        template_id = action_config.get('template_id')
+        if not template_id:
+            return ExecutionResult(False, 'error', {'error': 'template_id required'}, 'template_id required')
+        
+        try:
+            template = MessageTemplate.objects.get(id=template_id, channel='sms')
+        except MessageTemplate.DoesNotExist:
+            return ExecutionResult(False, 'error', {'error': 'Template not found'}, 'Template not found')
+        
+        # Render template with context
+        context = {
+            'lead': subscriber.lead,
+            'campaign': campaign,
+            'subscriber': subscriber
+        }
+        rendered_content = template.replace_variables(context)
+        
+        # Send message
+        success, sms_message = self.message_sender.send_message(
+            subscriber=subscriber,
+            campaign=campaign,
+            body=rendered_content,
+            rule=rule,
+            message_type='template'
+        )
+        
+        return ExecutionResult(
+            success,
+            'message_sent' if success else 'error',
+            {
+                'template_id': template_id,
+                'message_type': 'template',
+                'sms_message_id': sms_message.id if sms_message else None
+            },
+            error=None if success else 'Failed to send template message'
+        )
+    
+    def _handle_start_journey(self, campaign, rule, subscriber, message, action_config):
+        """Handle START_JOURNEY action"""
+        nurturing_campaign_id = (
+            action_config.get('nurturing_campaign_id') or
+            (campaign.follow_up_nurturing_campaign.id if campaign.follow_up_nurturing_campaign else None)
+        )
+        
+        if not nurturing_campaign_id:
+            return ExecutionResult(False, 'error', {'error': 'nurturing_campaign_id required'}, 'nurturing_campaign_id required')
+        
+        try:
+            nurturing_campaign = LeadNurturingCampaign.objects.get(id=nurturing_campaign_id)
+        except LeadNurturingCampaign.DoesNotExist:
+            return ExecutionResult(False, 'error', {'error': 'Nurturing campaign not found'}, 'Nurturing campaign not found')
+
+        # Ensure lead exists (create for CRM campaign if missing) so we can create participant
+        lead = subscriber.lead
+        if not lead:
+            lead = self._link_or_create_lead(subscriber, campaign, action_config or {'create_lead_if_missing': True})
+        if not lead:
+            return ExecutionResult(False, 'error', {'error': 'Subscriber has no linked lead'}, 'Subscriber has no linked lead')
+        created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
+        if not created_by_id:
+            return ExecutionResult(False, 'error', {'error': 'Nurturing campaign has no created_by'}, 'Nurturing campaign has no created_by')
+
+        # Get or create campaign-level subscription so participant can link via originating_subscription (doc item 2)
+        now = timezone.now()
+        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
+            subscriber=subscriber,
+            campaign=campaign,
+            defaults={
+                'status': 'opted_in',
+                'opted_in_at': now,
+                'opt_in_message': message,
+                'opt_in_rule': rule,
+                'lead': lead,
+            },
+        )
+        update_sub = []
+        if subscription.opt_in_rule_id is None and rule is not None:
+            subscription.opt_in_rule = rule
+            update_sub.append('opt_in_rule')
+        if subscription.opt_in_message_id is None and message is not None:
+            subscription.opt_in_message = message
+            update_sub.append('opt_in_message')
+        if subscription.lead_id is None and lead is not None:
+            subscription.lead = lead
+            update_sub.append('lead')
+        if update_sub:
+            subscription.save(update_fields=update_sub)
+
+        lead_for_participant = subscription.lead or lead
+        defaults = {
+            'status': 'active',
+            'originating_subscription': subscription,
+            'created_by_id': created_by_id,
+            'metadata': {},  # DB column is NOT NULL
+        }
+        participant, created = LeadNurturingParticipant.objects.get_or_create(
+            lead=lead_for_participant,
+            nurturing_campaign=nurturing_campaign,
+            defaults=defaults,
+        )
+        # Always set originating_subscription so it's set on create and when participant existed without it
+        if participant.originating_subscription_id != subscription.id:
+            participant.originating_subscription = subscription
+            participant.save(update_fields=['originating_subscription_id'])
+
+        # Enqueue first step (this would trigger journey processor)
+        # You may need to enqueue a task here to start the journey
+        # For now, we'll just create the participant
+        
+        return ExecutionResult(
+            True,
+            'nurturing_campaign_enrolled',
+            {
+                'nurturing_campaign_id': nurturing_campaign_id,
+                'nurturing_participant_id': participant.id,
+                'lead_id': lead.id
+            }
+        )
+    
+    def _handle_create_lead(self, campaign, rule, subscriber, message, action_config):
+        """
+        Handle CREATE_LEAD action.
+
+        Uses crm.services.lead_dedup: find by campaign/account + phone/email,
+        update or create, then set subscriber.lead and subscription.lead (doc item 1).
+        """
+        try:
+            from crm.services.lead_dedup import create_or_update_lead
+        except ImportError:
+            from external_models.models.external_references import Lead
+            # Fallback if lead_dedup not available
+            lead_data = dict(action_config.get('lead_data', {}))
+            crm_campaign = campaign.get_primary_crm_campaign()
+            if not crm_campaign:
+                rel = getattr(campaign, 'crm_campaign_relations', None)
+                if rel:
+                    first_rel = rel.filter(is_active=True).first()
+                    crm_campaign = first_rel.crm_campaign if first_rel else None
+            if not crm_campaign:
+                return ExecutionResult(
+                    False, 'error',
+                    {'error': 'Campaign has no linked CRM campaign; cannot create lead'},
+                    'Campaign has no linked CRM campaign'
+                )
+            lead_data.setdefault('campaign', crm_campaign)
+            lead_data.setdefault('phone_number', subscriber.phone_number)
+            lead_data.pop('account', None)
+            lead = Lead.objects.create(**lead_data)
+            subscriber.lead = lead
+            subscriber.save()
+            SmsSubscriberCampaignSubscription.objects.filter(
+                subscriber=subscriber, campaign=campaign
+            ).update(lead=lead)
+            return ExecutionResult(True, 'message_received', {'lead_id': lead.id, 'lead_created': True})
+
+        lead_data = dict(action_config.get('lead_data', {}))
+        phone_number = subscriber.phone_number
+        email = lead_data.get('email')
+        crm_campaign = campaign.get_primary_crm_campaign()
+        if not crm_campaign:
+            rel = getattr(campaign, 'crm_campaign_relations', None)
+            if rel:
+                first_rel = rel.filter(is_active=True).first()
+                crm_campaign = first_rel.crm_campaign if first_rel else None
+        if not crm_campaign:
+            return ExecutionResult(
+                False, 'error',
+                {'error': 'Campaign has no linked CRM campaign; cannot create lead'},
+                'Campaign has no linked CRM campaign'
+            )
+
+        lead, created_new = create_or_update_lead(
+            campaign=crm_campaign,
+            account=getattr(campaign, 'account', None),
+            phone_number=phone_number,
+            email=email,
+            lead_data=lead_data,
+            lead_type=None,
+        )
+        if not created_new:
+            logger.info(
+                "CREATE_LEAD: found existing lead id=%s (campaign + contact), updated and linked subscriber",
+                lead.id,
+            )
+
+        subscriber.lead = lead
+        subscriber.save()
+        SmsSubscriberCampaignSubscription.objects.filter(
+            subscriber=subscriber, campaign=campaign
+        ).update(lead=lead)
+
+        return ExecutionResult(
+            True,
+            'message_received',
+            {'lead_id': lead.id, 'lead_created': created_new}
+        )
+    
+    def _handle_route_to_agent(self, campaign, rule, subscriber, message, action_config):
+        """Handle ROUTE_TO_AGENT action"""
+        # Get or create conversation
+        conversation = self._get_or_create_conversation(subscriber, campaign.endpoint, subscriber.lead)
+        
+        # Create conversation message
+        conversation_message = ConversationMessage.objects.create(
+            conversation=conversation,
+            message_sid=f"SM_MKT_{message.id}",
+            direction='inbound',
+            channel='sms',
+            body=message.body_raw,
+            from_number=subscriber.phone_number,
+            to_number=campaign.endpoint.value,
+            raw_data={'sms_message_id': message.id}
+        )
+        
+        # Link SmsMessage to conversation
+        message.conversation = conversation
+        message.conversation_message = conversation_message
+        message.save()
+        
+        # Route to ACS (existing integration)
+        # This would call your ACS conversation engine
+        
+        return ExecutionResult(
+            True,
+            'message_received',
+            {
+                'conversation_id': conversation.id,
+                'conversation_message_id': conversation_message.id
+            }
+        )
+    
+    def _handle_composite(self, campaign, rule, subscriber, message, action_config):
+        """Handle COMPOSITE action"""
+        actions = action_config.get('actions', [])
+        execution_mode = action_config.get('execution_mode', 'sequential')
+        stop_on_error = action_config.get('stop_on_error', False)
+        
+        results = []
+        for action_item in actions:
+            action_type = action_item.get('type')
+            action_config_item = action_item.get('config', {})
+            
+            # Create a temporary rule-like object for sub-actions
+            class TempRule:
+                def __init__(self, action_type, action_config):
+                    self.action_type = action_type
+                    self.action_config = action_config
+                    self.keyword = type('Keyword', (), {'keyword': ''})()
+            
+            temp_rule = TempRule(action_type, action_config_item)
+            
+            result = self.execute_action(campaign, temp_rule, subscriber, message, action_config_item)
+            results.append({
+                'type': action_type,
+                'success': result.success,
+                'event_type': result.event_type
+            })
+            
+            if stop_on_error and not result.success:
+                break
+        
+        return ExecutionResult(
+            all(r['success'] for r in results),
+            'composite',
+            {'actions': results, 'execution_mode': execution_mode}
+        )
+    
+    # Helper methods
+    def _link_or_create_lead(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign, action_config: Dict):
+        """
+        Link subscriber to existing lead or create new one.
+        When a lead is set, also updates subscription.lead for (subscriber, campaign) (doc item 1).
+        """
+        if subscriber.lead_id:
+            lead = subscriber.lead
+            SmsSubscriberCampaignSubscription.objects.filter(
+                subscriber=subscriber, campaign=campaign
+            ).update(lead=lead)
+            return lead
+
+        crm_campaign = campaign.get_primary_crm_campaign()
+        if not crm_campaign:
+            rel = getattr(campaign, 'crm_campaign_relations', None)
+            if rel:
+                first_rel = rel.filter(is_active=True).first()
+                crm_campaign = first_rel.crm_campaign if first_rel else None
+        if not crm_campaign:
+            logger.warning(
+                "Cannot create lead for subscriber %s: SmsKeywordCampaign %s has no CRM campaign",
+                subscriber.phone_number, campaign.id
+            )
+            return None
+
+        if not action_config.get('create_lead_if_missing'):
+            lead = self.lead_matching.get_lead_by_phone(subscriber.phone_number)
+            if lead:
+                subscriber.lead = lead
+                subscriber.save()
+                SmsSubscriberCampaignSubscription.objects.filter(
+                    subscriber=subscriber, campaign=campaign
+                ).update(lead=lead)
+            return lead
+
+        try:
+            from crm.services.lead_dedup import create_or_update_lead
+            lead_data = action_config.get('lead_data') or {}
+            lead, _ = create_or_update_lead(
+                campaign=crm_campaign,
+                account=getattr(campaign, 'account', None),
+                phone_number=subscriber.phone_number,
+                email=lead_data.get('email'),
+                lead_data=lead_data,
+                lead_type=None,
+            )
+        except (ImportError, ValueError):
+            from external_models.models.external_references import Lead
+            lead = Lead.objects.create(
+                phone_number=subscriber.phone_number,
+                campaign=crm_campaign,
+            )
+
+        subscriber.lead = lead
+        subscriber.save()
+        SmsSubscriberCampaignSubscription.objects.filter(
+            subscriber=subscriber, campaign=campaign
+        ).update(lead=lead)
+        return lead
+
+    def _enroll_in_follow_up_nurturing_campaign_if_applicable(
+        self,
+        campaign,
+        subscriber,
+        message,
+        rule=None,
+    ):
+        """
+        When campaign has follow_up_nurturing_campaign, always enroll the subscriber into that
+        lead nurturing campaign: create the lead for the CRM campaign if not already created,
+        then create or get the participant with originating_subscription set to the campaign-level
+        opt-in subscription. Returns the participant or None.
+        """
+        nurturing_campaign = getattr(campaign, 'follow_up_nurturing_campaign', None)
+        if not nurturing_campaign:
+            return None
+
+        # Ensure lead exists so we can enroll (create for CRM campaign if missing)
+        lead = subscriber.lead
+        if not lead:
+            lead = self._link_or_create_lead(subscriber, campaign, {'create_lead_if_missing': True})
+        if not lead:
+            return None
+
+        # created_by_id is required by the DB; use the nurturing campaign's creator
+        created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
+        if not created_by_id:
+            return None
+
+        # Get or create the campaign-level subscription; backfill subscription.lead (doc item 1/2)
+        now = timezone.now()
+        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
+            subscriber=subscriber,
+            campaign=campaign,
+            defaults={
+                'status': 'opted_in',
+                'opted_in_at': now,
+                'opt_in_message': message,
+                'opt_in_rule': rule,
+                'lead': lead,
+            },
+        )
+        update_sub = []
+        if rule is not None and subscription.opt_in_rule_id is None:
+            subscription.opt_in_rule = rule
+            update_sub.append('opt_in_rule')
+        if message is not None and subscription.opt_in_message_id is None:
+            subscription.opt_in_message = message
+            update_sub.append('opt_in_message')
+        if subscription.lead_id is None and lead is not None:
+            subscription.lead = lead
+            update_sub.append('lead')
+        if update_sub:
+            subscription.save(update_fields=update_sub)
+
+        lead_for_participant = subscription.lead or lead
+        defaults = {
+            'status': 'active',
+            'originating_subscription': subscription,
+            'created_by_id': created_by_id,
+            'metadata': {},  # DB column is NOT NULL
+        }
+        participant, created = LeadNurturingParticipant.objects.get_or_create(
+            lead=lead_for_participant,
+            nurturing_campaign=nurturing_campaign,
+            defaults=defaults,
+        )
+        # Always set originating_subscription so it's set on create and when participant existed without it
+        if participant.originating_subscription_id != subscription.id:
+            participant.originating_subscription = subscription
+            participant.save(update_fields=['originating_subscription_id'])
+        return participant
+
+    def _get_or_create_conversation(self, subscriber: SmsSubscriber, endpoint, lead=None):
+        """Get or create conversation for SMS marketing"""
+        conversation_sid = f"SM_MKT_{endpoint.id}_{subscriber.phone_number}"
+        
+        conversation, created = Conversation.objects.get_or_create(
+            twilio_sid=conversation_sid,
+            defaults={
+                'channel': 'sms',
+                'state': 'active',
+                'lead': lead,
+                'messaging_service_sid': endpoint.value
+            }
+        )
+        
+        return conversation
+    
+    def _send_message(
+        self,
+        subscriber: SmsSubscriber,
+        campaign: Optional[SmsKeywordCampaign],
+        body: str,
+        rule: Optional[SmsKeywordRule] = None,
+        message_type: str = 'regular'
+    ):
+        """
+        Send SMS message using SMSMarketingMessageSender.
+
+        When rule has short_link set, passes raw body and context to the sender so it can
+        create SmsMessage first, inject {{link.short_link}}, and run replace_variables there.
+        Otherwise renders body with _render_plain_text and sends (no context).
+
+        Returns:
+            tuple: (success: bool, sms_message: SmsMessage or None)
+        """
+        if rule and rule.short_link:
+            context = self._build_message_context(subscriber=subscriber, campaign=campaign, rule=rule)
+            return self.message_sender.send_message(
+                subscriber=subscriber,
+                campaign=campaign,
+                body=body,
+                rule=rule,
+                message_type=message_type,
+                context=context,
+            )
+        rendered_body = self._render_plain_text(body, subscriber=subscriber, campaign=campaign, rule=rule)
+        return self.message_sender.send_message(
+            subscriber=subscriber,
+            campaign=campaign,
+            body=rendered_body,
+            rule=rule,
+            message_type=message_type,
+        )
+
+    def _build_message_context(
+        self,
+        subscriber: SmsSubscriber,
+        campaign: Optional[SmsKeywordCampaign] = None,
+        rule: Optional[SmsKeywordRule] = None,
+        extra_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build context dict for variable replacement (lead, campaign, keyword, etc.)."""
+        endpoint = None
+        try:
+            endpoint = campaign.endpoint if campaign else getattr(subscriber, 'endpoint', None)
+        except Exception:
+            endpoint = getattr(subscriber, 'endpoint', None)
+
+        keyword_text = None
+        try:
+            keyword_text = rule.keyword.keyword if rule and getattr(rule, 'keyword', None) else None
+        except Exception:
+            keyword_text = None
+
+        context: Dict[str, Any] = {
+            'lead': getattr(subscriber, 'lead', None),
+            'subscriber': subscriber,
+            'campaign': campaign,
+            'endpoint': endpoint,
+            'account': getattr(campaign, 'account', None) if campaign else getattr(endpoint, 'account', None),
+            'keyword': {
+                'keyword': keyword_text,
+                'endpoint_value': getattr(endpoint, 'value', None) if endpoint else None,
+            },
+        }
+        # Include link for {{link.short_link}} when rule has a short link (base URL from domain + slug_canonical).
+        # rule.short_link is the FK (Link instance); Link.short_link property returns get_full_url().
+        if rule and rule.short_link:
+            context['link'] = rule.short_link
+        if extra_context:
+            context.update(extra_context)
+        # Normalize: use lowercase 'link' so variable replacement is consistent with other categories
+        if 'Link' in context:
+            if 'link' not in context:
+                context['link'] = context['Link']
+            del context['Link']
+        return context
+
+    def _render_plain_text(
+        self,
+        body: Optional[str],
+        subscriber: SmsSubscriber,
+        campaign: Optional[SmsKeywordCampaign] = None,
+        rule: Optional[SmsKeywordRule] = None,
+        extra_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Apply TemplateVariable/TemplateVariableCategory replacement to plain text bodies.
+        Uses MessageTemplate.replace_variables() so templates and plain text share the same variable system.
+        """
+        if not body:
+            return body or ""
+
+        context = self._build_message_context(
+            subscriber=subscriber, campaign=campaign, rule=rule, extra_context=extra_context
+        )
+        try:
+            return MessageTemplate(content=body).replace_variables(context)
+        except Exception as e:
+            logger.warning(f"Variable replacement failed; sending raw body. error={e}")
+            return body
+    
+    def _send_welcome_message(self, campaign: SmsKeywordCampaign, rule: Optional[SmsKeywordRule], subscriber: SmsSubscriber, action_config: Dict):
+        """Send welcome message after opt-in"""
+        template_id = action_config.get('template_id')
+        welcome_text = action_config.get('welcome_message')
+        rule_initial_reply = getattr(rule, 'initial_reply', None) if rule else None
+        
+        # Priority (per design doc):
+        # 1) rule.initial_reply -> 2) action_config.template_id -> 3) action_config.welcome_message -> 4) campaign.welcome_message
+        if rule_initial_reply:
+            self._send_message(subscriber, campaign, rule_initial_reply, rule=rule, message_type='welcome')
+        elif template_id:
+            # Use template
+            self._handle_send_template(campaign, None, subscriber, None, {'template_id': template_id})
+        elif welcome_text:
+            # Use direct text
+            self._send_message(subscriber, campaign, welcome_text, rule=rule, message_type='welcome')
+        elif hasattr(campaign, 'welcome_message') and campaign.welcome_message:
+            # Use campaign default
+            self._send_message(subscriber, campaign, campaign.welcome_message, rule=rule, message_type='welcome')
+    
+    def _send_confirmation_request(self, campaign: SmsKeywordCampaign, rule: Optional[SmsKeywordRule], subscriber: SmsSubscriber, action_config: Dict):
+        """Send double opt-in confirmation request"""
+        confirmation_text = (
+            (getattr(rule, 'confirmation_message', None) if rule else None) or
+            action_config.get('confirmation_message') or
+            getattr(campaign, 'confirmation_message', None) or
+            "Reply YES to confirm your opt-in."
+        )
+        self._send_message(subscriber, campaign, confirmation_text, rule=rule, message_type='confirmation')
+    
+    def _send_opt_out_confirmation(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign):
+        """Send opt-out confirmation. Endpoint first, then campaign, then default."""
+        endpoint = getattr(subscriber, 'endpoint', None)
+        sms_settings = getattr(endpoint, 'sms_settings', None) if endpoint else None
+        opt_out_text = (
+            (getattr(sms_settings, 'stop_message', None) if sms_settings else None)
+            or getattr(campaign, 'opt_out_message', None)
+            or "You have been unsubscribed. You will no longer receive messages."
+        )
+        self._send_message(subscriber, campaign, opt_out_text, message_type='opt_out')
+
+
+# ---------------------------------------------------------------------------
+# Adapter layer for processor: function-based API that delegates to the class.
+# Processor imports execute_action, ActionExecutionResult, link_lead_for_subscriber,
+# enroll_subscriber_in_follow_up_nurturing, get_welcome_message_for_opt_in.
+# ---------------------------------------------------------------------------
+
 class ActionExecutionResult:
-    """Result of executing an action"""
+    """Result type expected by processor (success, message, data)."""
     def __init__(self, success: bool, message: str = "", data: Optional[Dict[str, Any]] = None):
         self.success = success
         self.message = message
@@ -37,923 +761,54 @@ def execute_action(
     rule: SmsKeywordRule,
     subscriber: SmsSubscriber,
     message: SmsMessage,
-    action_config: Optional[Dict[str, Any]] = None
+    action_config: Optional[Dict[str, Any]] = None,
 ) -> ActionExecutionResult:
-    """
-    Execute an action based on the rule's action_type.
-    
-    Args:
-        campaign: The SMS keyword campaign
-        rule: The matched keyword rule
-        subscriber: The SMS subscriber
-        message: The inbound SMS message
-        action_config: Action configuration (from rule.action_config or campaign defaults)
-        
-    Returns:
-        ActionExecutionResult with success status and details
-    """
-    action_type = rule.action_type
-    config = action_config or rule.action_config or {}
-    
-    logger.info(f"Executing action {action_type} for subscriber {subscriber.phone_number}")
-    
-    try:
-        if action_type == 'OPT_IN':
-            return handle_opt_in(campaign, rule, subscriber, message, config)
-        elif action_type == 'OPT_OUT':
-            return handle_opt_out(campaign, rule, subscriber, message, config)
-        elif action_type == 'HELP':
-            return handle_help(campaign, rule, subscriber, message, config)
-        elif action_type == 'SEND_TEMPLATE':
-            return handle_send_template(campaign, rule, subscriber, message, config)
-        elif action_type == 'START_JOURNEY':
-            return handle_start_journey(campaign, rule, subscriber, message, config)
-        elif action_type == 'CREATE_LEAD':
-            return handle_create_lead(campaign, rule, subscriber, message, config)
-        elif action_type == 'ROUTE_TO_AGENT':
-            return handle_route_to_agent(campaign, rule, subscriber, message, config)
-        elif action_type == 'COMPOSITE':
-            return handle_composite(campaign, rule, subscriber, message, config)
-        else:
-            logger.warning(f"Unknown action type: {action_type}")
-            return ActionExecutionResult(
-                success=False,
-                message=f"Unknown action type: {action_type}"
-            )
-    except Exception as e:
-        logger.exception(f"Error executing action {action_type}: {str(e)}")
-        return ActionExecutionResult(
-            success=False,
-            message=f"Error executing action: {str(e)}"
-        )
-
-
-def handle_opt_in(
-    campaign: SmsKeywordCampaign,
-    rule: SmsKeywordRule,
-    subscriber: SmsSubscriber,
-    message: SmsMessage,
-    config: Dict[str, Any]
-) -> ActionExecutionResult:
-    """
-    Handle OPT_IN action.
-    
-    Respects campaign.opt_in_mode:
-    - 'single': Set subscriber to opted_in immediately
-    - 'double': Set subscriber to pending_opt_in, send confirmation request
-    - 'none': Skip opt-in state change (log only)
-    
-    Priority for welcome message:
-    1. config.template_id (if set)
-    2. config.welcome_message (if set)
-    3. rule.initial_reply (keyword-level default)
-    4. campaign.welcome_message (campaign-level default)
-    5. No message sent
-    
-    Priority for confirmation message (double opt-in):
-    1. config.confirmation_message
-    2. rule.confirmation_message (keyword-level default)
-    3. campaign.confirmation_message (campaign-level default)
-    4. Default: "Reply YES to confirm your opt-in."
-    """
-    opt_in_mode = campaign.opt_in_mode
-    
-    with transaction.atomic():
-        now = timezone.now()
-        # Update subscriber state based on opt_in_mode
-        if opt_in_mode == 'single':
-            subscriber.status = 'opted_in'
-            subscriber.opt_in_at = now
-            subscriber.opt_in_source = 'keyword'
-            subscriber.opt_in_keyword = rule.keyword.keyword if rule.keyword else None
-            subscriber.opt_in_message = message
-            subscriber.last_inbound_at = now
-            subscriber.sms_campaign = campaign
-            subscriber.save()
-            
-            # Send welcome message for single opt-in
-            welcome_message = _get_welcome_message(campaign, rule, config)
-            if welcome_message:
-                # TODO: Enqueue task to send SMS message
-                logger.info(f"Would send welcome message: {welcome_message}")
-            
-        elif opt_in_mode == 'double':
-            subscriber.status = 'pending_opt_in'
-            subscriber.opt_in_source = 'keyword'
-            subscriber.opt_in_keyword = rule.keyword.keyword if rule.keyword else None
-            subscriber.opt_in_message = message
-            subscriber.last_inbound_at = now
-            subscriber.sms_campaign = campaign
-            subscriber.save()
-            
-            # Send confirmation message
-            # Priority: config.confirmation_message > rule.confirmation_message > campaign.confirmation_message > default
-            confirmation_message = (
-                config.get('confirmation_message') or
-                rule.confirmation_message or
-                campaign.confirmation_message
-            )
-            if not confirmation_message:
-                confirmation_message = "Reply YES to confirm your opt-in."
-            # TODO: Enqueue task to send SMS message
-            logger.info(f"Would send confirmation message: {confirmation_message}")
-            
-        elif opt_in_mode == 'none':
-            # Skip opt-in state change, just log
-            subscriber.last_inbound_at = now
-            subscriber.sms_campaign = campaign
-            subscriber.save()
-
-        # Per-campaign subscription: get_or_create and set status/opted_in_at/opt_in_message/opt_in_rule (re-opt-in clears opted_out)
-        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
-            subscriber=subscriber,
-            campaign=campaign,
-            defaults={
-                'status': 'pending_opt_in' if opt_in_mode == 'double' else 'opted_in',
-                'opted_in_at': now,
-                'opt_in_message': message,
-                'opt_in_rule': rule,
-            },
-        )
-        subscription.status = 'pending_opt_in' if opt_in_mode == 'double' else 'opted_in'
-        subscription.opted_in_at = now
-        subscription.opt_in_message = message
-        subscription.opt_in_rule = rule
-        subscription.opted_out_at = None
-        subscription.opt_out_message = None
-        if subscriber.lead_id and subscription.lead_id is None:
-            subscription.lead = subscriber.lead
-        subscription.save()
-
-        # Double opt-in: When the subscriber replies YES to confirm, the processor that handles
-        # that confirmation must set this subscription to status='opted_in' and optionally
-        # update opted_in_at to the confirmation time. Do not change opt_in_message or opt_in_rule
-        # (they stay the initial START message/rule). See SmsSubscriberCampaignSubscription.
-        
-        # Handle lead creation if requested
-        if config.get('create_lead_if_missing') and not subscriber.lead:
-            # TODO: Enqueue task to create lead
-            logger.info("Would create lead if missing")
-        
-        # Create event log
-        SmsCampaignEvent.objects.create(
-            endpoint=subscriber.endpoint,
-            campaign=campaign,
-            rule=rule,
-            subscriber=subscriber,
-            message=message,
-            event_type='opt_in',
-            payload={
-                'opt_in_mode': opt_in_mode,
-                'keyword': rule.keyword.keyword if rule.keyword else None,
-            }
-        )
-    
+    """Execute action via SMSMarketingActionExecutor. Returns ActionExecutionResult for processor."""
+    executor = SMSMarketingActionExecutor()
+    result = executor.execute_action(
+        campaign, rule, subscriber, message, action_config or {}
+    )
     return ActionExecutionResult(
-        success=True,
-        message=f"Opt-in processed (mode: {opt_in_mode})"
+        success=result.success,
+        message=result.error or "",
+        data=result.payload or {},
     )
-
-
-def handle_opt_out(
-    campaign: SmsKeywordCampaign,
-    rule: SmsKeywordRule,
-    subscriber: SmsSubscriber,
-    message: SmsMessage,
-    config: Dict[str, Any]
-) -> ActionExecutionResult:
-    """
-    Handle OPT_OUT action.
-    
-    Priority for opt-out message:
-    1. campaign.opt_out_message (campaign-level default)
-    2. Default: "You have been unsubscribed. You will no longer receive messages."
-    
-    Note: Opt-out is universal behavior, so opt-out messages are campaign-level only.
-    """
-    now = timezone.now()
-    with transaction.atomic():
-        subscriber.status = 'opted_out'
-        subscriber.opt_out_at = now
-        subscriber.opt_out_source = 'keyword'
-        subscriber.opt_out_message = message
-        subscriber.last_inbound_at = now
-        subscriber.save()
-
-        # Per-campaign subscription: get_or_create then set opted_out for this campaign
-        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
-            subscriber=subscriber,
-            campaign=campaign,
-            defaults={'status': 'opted_out', 'opted_out_at': now, 'opt_out_message': message},
-        )
-        subscription.status = 'opted_out'
-        subscription.opted_out_at = now
-        subscription.opt_out_message = message
-        subscription.save()
-
-        # Global STOP: mark all other campaign subscriptions for this subscriber as opted_out
-        SmsSubscriberCampaignSubscription.objects.filter(
-            subscriber=subscriber
-        ).exclude(campaign=campaign).update(status='opted_out', opted_out_at=now)
-        
-        # Send opt-out confirmation
-        # Priority: campaign.opt_out_message > endpoint.sms_settings.stop_message > default
-        opt_out_message = campaign.opt_out_message
-        if not opt_out_message and getattr(subscriber, 'endpoint_id', None):
-            endpoint_sms = getattr(getattr(subscriber, 'endpoint', None), 'sms_settings', None)
-            if endpoint_sms and getattr(endpoint_sms, 'stop_message', None):
-                opt_out_message = endpoint_sms.stop_message
-        if not opt_out_message:
-            opt_out_message = "You have been unsubscribed. You will no longer receive messages."
-        # TODO: Enqueue task to send SMS message
-        logger.info(f"Would send opt-out confirmation: {opt_out_message}")
-        
-        # Create event log
-        SmsCampaignEvent.objects.create(
-            endpoint=subscriber.endpoint,
-            campaign=campaign,
-            rule=rule,
-            subscriber=subscriber,
-            message=message,
-            event_type='opt_out',
-            payload={
-                'keyword': rule.keyword.keyword if rule.keyword else None,
-            }
-        )
-    
-    return ActionExecutionResult(
-        success=True,
-        message="Opt-out processed"
-    )
-
-
-def handle_help(
-    campaign: SmsKeywordCampaign,
-    rule: SmsKeywordRule,
-    subscriber: SmsSubscriber,
-    message: SmsMessage,
-    config: Dict[str, Any]
-) -> ActionExecutionResult:
-    """
-    Handle HELP action.
-    
-    Priority for help message:
-    1. config.help_text (rule-specific override in action_config)
-    2. campaign.help_text (campaign-level default)
-    3. campaign.program.help_text (if program exists)
-    4. endpoint.sms_settings.help_message (endpoint-level default)
-    5. Default: "Reply STOP to opt out. Reply HELP for more information."
-    """
-    help_text = (
-        config.get('help_text') or
-        campaign.help_text or
-        (campaign.program.help_text if campaign.program else None)
-    )
-    if not help_text and getattr(subscriber, 'endpoint_id', None):
-        endpoint_sms = getattr(getattr(subscriber, 'endpoint', None), 'sms_settings', None)
-        if endpoint_sms and getattr(endpoint_sms, 'help_message', None):
-            help_text = endpoint_sms.help_message
-    if not help_text:
-        help_text = "Reply STOP to opt out. Reply HELP for more information."
-    
-    # TODO: Enqueue task to send SMS message
-    logger.info(f"Would send help message: {help_text}")
-    
-    # Create event log
-    SmsCampaignEvent.objects.create(
-        endpoint=subscriber.endpoint,
-        campaign=campaign,
-        rule=rule,
-        subscriber=subscriber,
-        message=message,
-        event_type='message_sent',
-        payload={
-            'message_type': 'help',
-            'help_text': help_text,
-        }
-    )
-    
-    return ActionExecutionResult(
-        success=True,
-        message="Help message sent"
-    )
-
-
-def handle_send_template(
-    campaign: SmsKeywordCampaign,
-    rule: SmsKeywordRule,
-    subscriber: SmsSubscriber,
-    message: SmsMessage,
-    config: Dict[str, Any]
-) -> ActionExecutionResult:
-    """
-    Handle SEND_TEMPLATE action.
-    
-    Requires config.template_id (ID of MessageTemplate with channel='sms').
-    Template context variables available:
-    - lead: Subscriber's linked Lead
-    - campaign: SmsKeywordCampaign
-    - subscriber: SmsSubscriber
-    """
-    template_id = config.get('template_id')
-    if not template_id:
-        return ActionExecutionResult(
-            success=False,
-            message="SEND_TEMPLATE action requires template_id in config"
-        )
-    
-    try:
-        from external_models.models.messages import MessageTemplate
-        
-        template = MessageTemplate.objects.get(id=template_id, channel='sms')
-        
-        # Build template context
-        context = {
-            'lead': subscriber.lead,
-            'campaign': campaign,
-            'subscriber': subscriber,
-        }
-        
-        # TODO: Render template with context and enqueue task to send SMS message
-        logger.info(f"Would send template message (template_id={template_id})")
-        
-        # Create event log
-        SmsCampaignEvent.objects.create(
-            endpoint=subscriber.endpoint,
-            campaign=campaign,
-            rule=rule,
-            subscriber=subscriber,
-            message=message,
-            event_type='message_sent',
-            payload={
-                'message_type': 'template',
-                'template_id': template_id,
-            }
-        )
-        
-        return ActionExecutionResult(
-            success=True,
-            message=f"Template message queued (template_id={template_id})"
-        )
-    except MessageTemplate.DoesNotExist:
-        return ActionExecutionResult(
-            success=False,
-            message=f"MessageTemplate with id={template_id} and channel='sms' not found"
-        )
-
-
-def handle_start_journey(
-    campaign: SmsKeywordCampaign,
-    rule: SmsKeywordRule,
-    subscriber: SmsSubscriber,
-    message: SmsMessage,
-    config: Dict[str, Any]
-) -> ActionExecutionResult:
-    """
-    Handle START_JOURNEY action.
-    
-    Requires subscriber to have a linked lead (will fail if no lead).
-    Uses config.nurturing_campaign_id or falls back to campaign.follow_up_nurturing_campaign.
-    """
-    nurturing_campaign_id = config.get('nurturing_campaign_id')
-    if not nurturing_campaign_id:
-        if campaign.follow_up_nurturing_campaign:
-            nurturing_campaign = campaign.follow_up_nurturing_campaign
-        else:
-            return ActionExecutionResult(
-                success=False,
-                message="START_JOURNEY action requires nurturing_campaign_id in config or campaign.follow_up_nurturing_campaign"
-            )
-    else:
-        try:
-            from external_models.models.nurturing_campaigns import LeadNurturingCampaign
-            nurturing_campaign = LeadNurturingCampaign.objects.get(id=nurturing_campaign_id)
-        except LeadNurturingCampaign.DoesNotExist:
-            return ActionExecutionResult(
-                success=False,
-                message=f"LeadNurturingCampaign with id={nurturing_campaign_id} not found"
-            )
-    
-    # Create LeadNurturingParticipant
-    try:
-        from external_models.models.nurturing_campaigns import LeadNurturingParticipant
-
-        # Get or create campaign-level subscription (single source of truth for subscriber, campaign, rule, opt-in message)
-        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
-            subscriber=subscriber,
-            campaign=campaign,
-            defaults={
-                'status': 'opted_in',
-                'opted_in_at': timezone.now(),
-                'opt_in_message': message,
-                'opt_in_rule': rule,
-                'lead': subscriber.lead,  # campaign-scoped lead; backfill from subscriber
-            }
-        )
-        # Update subscription with rule/message/lead if it already existed but was missing them
-        update_fields = []
-        if subscription.opt_in_rule_id is None and rule:
-            subscription.opt_in_rule = rule
-            subscription.opt_in_message = message or subscription.opt_in_message
-            update_fields.extend(['opt_in_rule', 'opt_in_message'])
-        elif subscription.opt_in_message_id is None and message:
-            subscription.opt_in_message = message
-            update_fields.append('opt_in_message')
-        if subscription.lead_id is None and subscriber.lead_id:
-            subscription.lead = subscriber.lead
-            update_fields.append('lead')
-        if update_fields:
-            subscription.save(update_fields=update_fields)
-
-        # Prefer subscription.lead (campaign-scoped); fall back to subscriber.lead for backfill
-        lead_for_participant = subscription.lead or subscriber.lead
-        if not lead_for_participant:
-            return ActionExecutionResult(
-                success=False,
-                message="START_JOURNEY action requires a linked lead (subscription.lead or subscriber.lead)"
-            )
-
-        participant, created = LeadNurturingParticipant.objects.get_or_create(
-            nurturing_campaign=nurturing_campaign,
-            lead=lead_for_participant,
-            defaults={
-                'status': 'active',
-                'originating_subscription': subscription,
-            }
-        )
-        # Backfill attribution if participant already existed but was missing it
-        if not created and participant.originating_subscription_id is None:
-            participant.originating_subscription = subscription
-            participant.save(update_fields=['originating_subscription_id'])
-        
-        # TODO: Enqueue first step in journey system
-        
-        # Create event log
-        SmsCampaignEvent.objects.create(
-            endpoint=subscriber.endpoint,
-            campaign=campaign,
-            rule=rule,
-            subscriber=subscriber,
-            message=message,
-            event_type='nurturing_campaign_enrolled',
-            nurturing_campaign=nurturing_campaign,
-            nurturing_participant=participant,
-            payload={
-                'nurturing_campaign_id': nurturing_campaign.id,
-                'participant_id': participant.id,
-            }
-        )
-        
-        return ActionExecutionResult(
-            success=True,
-            message=f"Enrolled in nurturing campaign (id={nurturing_campaign.id})"
-        )
-    except Exception as e:
-        logger.exception(f"Error creating LeadNurturingParticipant: {str(e)}")
-        return ActionExecutionResult(
-            success=False,
-            message=f"Error enrolling in journey: {str(e)}"
-        )
-
-
-def handle_create_lead(
-    campaign: SmsKeywordCampaign,
-    rule: SmsKeywordRule,
-    subscriber: SmsSubscriber,
-    message: SmsMessage,
-    config: Dict[str, Any]
-) -> ActionExecutionResult:
-    """
-    Handle CREATE_LEAD action.
-
-    Uses shared crm.services.lead_dedup: find by campaign/account + phone/email,
-    update or create, then link subscriber and subscriptions. Requires a linked
-    CRM campaign for creation.
-    """
-    try:
-        from crm.services.lead_dedup import create_or_update_lead
-
-        lead_data = config.get('lead_data', {})
-        phone_number = subscriber.phone_number
-        email = lead_data.get('email')
-
-        # Resolve CRM campaign: primary or first active linked
-        crm_campaign = campaign.get_primary_crm_campaign()
-        if not crm_campaign:
-            rel = campaign.crm_campaign_relations.filter(is_active=True).first()
-            crm_campaign = rel.crm_campaign if rel else None
-
-        if not crm_campaign:
-            return ActionExecutionResult(
-                success=False,
-                message="Cannot create lead: link a CRM campaign to this SMS campaign (primary or active).",
-            )
-
-        lead, created_new = create_or_update_lead(
-            campaign=crm_campaign,
-            account=campaign.account,
-            phone_number=phone_number,
-            email=email,
-            lead_data=lead_data,
-            lead_type=None,  # SMS uses base Lead
-        )
-
-        if not created_new:
-            logger.info(
-                f"CREATE_LEAD: found existing lead id={lead.id} (campaign + contact), updated and linked subscriber"
-            )
-
-        # Link to subscriber (kept for backfill / existing integrations)
-        subscriber.lead = lead
-        subscriber.save()
-
-        # Campaign-scoped: set subscription.lead when subscription exists for this campaign
-        SmsSubscriberCampaignSubscription.objects.filter(
-            subscriber=subscriber, campaign=campaign
-        ).update(lead=lead)
-
-        # Create event log
-        SmsCampaignEvent.objects.create(
-            endpoint=subscriber.endpoint,
-            campaign=campaign,
-            rule=rule,
-            subscriber=subscriber,
-            message=message,
-            event_type='message_received',
-            payload={
-                'action': 'create_lead',
-                'lead_id': lead.id,
-            }
-        )
-
-        return ActionExecutionResult(
-            success=True,
-            message=f"Lead {'updated' if not created_new else 'created'} (id={lead.id})",
-            data={'lead_id': lead.id}
-        )
-    except ValueError as e:
-        return ActionExecutionResult(success=False, message=str(e))
-    except Exception as e:
-        logger.exception(f"Error creating lead: {str(e)}")
-        return ActionExecutionResult(
-            success=False,
-            message=f"Error creating lead: {str(e)}"
-        )
 
 
 def link_lead_for_subscriber(
     subscriber: SmsSubscriber,
     campaign: SmsKeywordCampaign,
-    config: Dict[str, Any],
-) -> Optional["Lead"]:
-    """
-    Link or create lead for subscriber and set subscription.lead for this campaign.
-    Used after double opt-in confirmation. Returns the lead or None.
-    """
-    from external_models.models.external_references import Lead
-    from crm.services.lead_dedup import create_or_update_lead
-
-    if subscriber.lead_id:
-        lead = subscriber.lead
-        SmsSubscriberCampaignSubscription.objects.filter(
-            subscriber=subscriber, campaign=campaign
-        ).update(lead=lead)
-        return lead
-
-    if not config.get('create_lead_if_missing'):
-        return None
-
-    crm_campaign = campaign.get_primary_crm_campaign()
-    if not crm_campaign:
-        rel = campaign.crm_campaign_relations.filter(is_active=True).first()
-        crm_campaign = rel.crm_campaign if rel else None
-    if not crm_campaign:
-        logger.warning(
-            "Cannot create lead for subscriber %s: SmsKeywordCampaign %s has no CRM campaign",
-            subscriber.phone_number, campaign.id,
-        )
-        return None
-
-    lead_data = config.get('lead_data', {})
-    try:
-        lead, _ = create_or_update_lead(
-            campaign=crm_campaign,
-            account=campaign.account,
-            phone_number=subscriber.phone_number,
-            email=lead_data.get('email'),
-            lead_data=lead_data,
-            lead_type=None,
-        )
-    except ValueError as e:
-        logger.warning(f"link_lead_for_subscriber: {e}")
-        return None
-
-    subscriber.lead = lead
-    subscriber.save()
-    SmsSubscriberCampaignSubscription.objects.filter(
-        subscriber=subscriber, campaign=campaign
-    ).update(lead=lead)
-    return lead
+    config: Optional[Dict[str, Any]] = None,
+):
+    """Link or create lead for subscriber and set subscription.lead (doc item 1). Used after double opt-in."""
+    executor = SMSMarketingActionExecutor()
+    return executor._link_or_create_lead(subscriber, campaign, config or {})
 
 
 def enroll_subscriber_in_follow_up_nurturing(
     campaign: SmsKeywordCampaign,
     subscriber: SmsSubscriber,
     message: SmsMessage,
-    rule: Optional[SmsKeywordRule],
-) -> Optional[Any]:
-    """
-    If campaign has follow_up_nurturing_campaign, get_or_create subscription and
-    LeadNurturingParticipant with originating_subscription. Returns participant or None.
-    """
-    nurturing_campaign = getattr(campaign, 'follow_up_nurturing_campaign', None)
-    if not nurturing_campaign:
-        return None
-
-    from external_models.models.nurturing_campaigns import LeadNurturingParticipant
-
-    now = timezone.now()
-    subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
-        subscriber=subscriber,
-        campaign=campaign,
-        defaults={
-            'status': 'opted_in',
-            'opted_in_at': now,
-            'opt_in_message': message,
-            'opt_in_rule': rule,
-            'lead': subscriber.lead,
-        },
+    rule: Optional[SmsKeywordRule] = None,
+):
+    """Enroll subscriber in follow_up_nurturing_campaign with originating_subscription (doc item 2)."""
+    executor = SMSMarketingActionExecutor()
+    return executor._enroll_in_follow_up_nurturing_campaign_if_applicable(
+        campaign, subscriber, message, rule=rule
     )
-    update_fields = []
-    if subscription.opt_in_rule_id is None and rule:
-        subscription.opt_in_rule = rule
-        subscription.opt_in_message = message or subscription.opt_in_message
-        update_fields.extend(['opt_in_rule', 'opt_in_message'])
-    elif subscription.opt_in_message_id is None and message:
-        subscription.opt_in_message = message
-        update_fields.append('opt_in_message')
-    if subscription.lead_id is None and subscriber.lead_id:
-        subscription.lead = subscriber.lead
-        update_fields.append('lead')
-    if update_fields:
-        subscription.save(update_fields=update_fields)
-
-    lead_for_participant = subscription.lead or subscriber.lead
-    if not lead_for_participant:
-        return None
-
-    participant, created = LeadNurturingParticipant.objects.get_or_create(
-        nurturing_campaign=nurturing_campaign,
-        lead=lead_for_participant,
-        defaults={
-            'status': 'active',
-            'originating_subscription': subscription,
-        },
-    )
-    if not created and participant.originating_subscription_id is None:
-        participant.originating_subscription = subscription
-        participant.save(update_fields=['originating_subscription_id'])
-    return participant
 
 
 def get_welcome_message_for_opt_in(
     campaign: SmsKeywordCampaign,
     rule: SmsKeywordRule,
-    config: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
-    """Return welcome message body for opt-in (same priority as _get_welcome_message)."""
-    return _get_welcome_message(campaign, rule, config)
-
-
-def handle_route_to_agent(
-    campaign: SmsKeywordCampaign,
-    rule: SmsKeywordRule,
-    subscriber: SmsSubscriber,
-    message: SmsMessage,
-    config: Dict[str, Any]
-) -> ActionExecutionResult:
-    """
-    Handle ROUTE_TO_AGENT action.
-    
-    Creates/retrieves Conversation for subscriber.
-    Creates ConversationMessage for threading.
-    Links SmsMessage to conversation.
-    Routes to ACS conversation engine.
-    """
-    try:
-        from external_models.models.communications import Conversation, ConversationMessage, Participant
-        
-        # Get or create conversation
-        conversation_sid = f"SM_MKT_{subscriber.endpoint.id}_{subscriber.phone_number}"
-        
-        conversation, created = Conversation.objects.get_or_create(
-            twilio_sid=conversation_sid,
-            defaults={
-                'channel': 'sms',
-                'state': 'active',
-                'lead': subscriber.lead,
-                'messaging_service_sid': subscriber.endpoint.value,
-                'account_sid': message.account_sid,  # Twilio Account SID from message
-            }
-        )
-        
-        # Update conversation if it already existed
-        if not created:
-            conversation.lead = subscriber.lead or conversation.lead
-            conversation.state = 'active'
-            conversation.save()
-        
-        # Get or create participant
-        # Generate a unique participant SID if needed
-        participant_sid = f"PN_{conversation.id}_{subscriber.phone_number[-4:]}"
-        participant, _ = Participant.objects.get_or_create(
-            conversation=conversation,
-            phone_number=subscriber.phone_number,
-            defaults={
-                'participant_sid': participant_sid,
-            }
-        )
-        
-        # Create conversation message
-        conversation_message = ConversationMessage.objects.create(
-            conversation=conversation,
-            participant=participant,
-            body=message.body_raw,
-            direction='inbound',
-            channel='sms',
-            message_sid=message.provider_message_id or f"SM_{message.id}",
-            account_sid=message.account_sid,
-            messaging_service_sid=message.messaging_service_sid,
-            status='received',
-        )
-        
-        # Link SmsMessage to conversation
-        message.conversation = conversation
-        message.conversation_message = conversation_message
-        message.save()
-        
-        # TODO: Route to ACS conversation engine
-        logger.info(f"Would route to ACS conversation engine (conversation_id={conversation.id})")
-        
-        # Create event log
-        SmsCampaignEvent.objects.create(
-            endpoint=subscriber.endpoint,
-            campaign=campaign,
-            rule=rule,
-            subscriber=subscriber,
-            message=message,
-            event_type='message_received',
-            payload={
-                'action': 'route_to_agent',
-                'conversation_id': conversation.id,
-                'conversation_message_id': conversation_message.id,
-            }
-        )
-        
-        return ActionExecutionResult(
-            success=True,
-            message=f"Routed to agent (conversation_id={conversation.id})",
-            data={
-                'conversation_id': conversation.id,
-                'conversation_message_id': conversation_message.id,
-            }
-        )
-    except Exception as e:
-        logger.exception(f"Error routing to agent: {str(e)}")
-        return ActionExecutionResult(
-            success=False,
-            message=f"Error routing to agent: {str(e)}"
-        )
-
-
-def handle_composite(
-    campaign: SmsKeywordCampaign,
-    rule: SmsKeywordRule,
-    subscriber: SmsSubscriber,
-    message: SmsMessage,
-    config: Dict[str, Any]
-) -> ActionExecutionResult:
-    """
-    Handle COMPOSITE action.
-    
-    Executes multiple actions in sequence or parallel.
-    config.actions: Array of {type, config} objects
-    config.execution_mode: 'sequential' | 'parallel' (default: 'sequential')
-    config.stop_on_error: bool (default: False)
-    """
-    actions = config.get('actions', [])
-    if not actions:
-        return ActionExecutionResult(
-            success=False,
-            message="COMPOSITE action requires 'actions' array with at least one action"
-        )
-    
-    execution_mode = config.get('execution_mode', 'sequential')
-    stop_on_error = config.get('stop_on_error', False)
-    
-    results = []
-    errors = []
-    
-    if execution_mode == 'sequential':
-        # Execute actions one by one
-        for i, action_item in enumerate(actions):
-            action_type = action_item.get('type')
-            action_config = action_item.get('config', {})
-            
-            if not action_type:
-                error_msg = f"Action {i+1} is missing 'type' field"
-                errors.append(error_msg)
-                if stop_on_error:
-                    break
-                continue
-            
-            # Create a temporary rule for this sub-action
-            temp_rule = SmsKeywordRule(
-                campaign=campaign,
-                action_type=action_type,
-                action_config=action_config
-            )
-            
-            result = execute_action(
-                campaign=campaign,
-                rule=temp_rule,
-                subscriber=subscriber,
-                message=message,
-                action_config=action_config
-            )
-            
-            results.append({
-                'index': i,
-                'type': action_type,
-                'success': result.success,
-                'message': result.message,
-            })
-            
-            if not result.success and stop_on_error:
-                errors.append(f"Action {i+1} ({action_type}) failed: {result.message}")
-                break
-    else:
-        # Parallel execution (simplified - in production would use async tasks)
-        # For now, execute sequentially but log as parallel
-        logger.warning("Parallel execution mode requested but executing sequentially (not yet implemented)")
-        return handle_composite(campaign, rule, subscriber, message, {
-            **config,
-            'execution_mode': 'sequential'
-        })
-    
-    # Create event log
-    SmsCampaignEvent.objects.create(
-        endpoint=subscriber.endpoint,
-        campaign=campaign,
-        rule=rule,
-        subscriber=subscriber,
-        message=message,
-        event_type='message_received',
-        payload={
-            'action': 'composite',
-            'execution_mode': execution_mode,
-            'results': results,
-            'errors': errors,
-        }
-    )
-    
-    success = len(errors) == 0
-    return ActionExecutionResult(
-        success=success,
-        message=f"Composite action executed ({len(results)} actions, {len(errors)} errors)",
-        data={
-            'results': results,
-            'errors': errors,
-        }
-    )
-
-
-def _get_welcome_message(campaign: SmsKeywordCampaign, rule: SmsKeywordRule, config: Dict[str, Any]) -> Optional[str]:
-    """
-    Get welcome message based on priority:
-    1. config.template_id (if set) - TODO: render template
-    2. config.welcome_message (if set)
-    3. rule.initial_reply (keyword-level default)
-    4. campaign.welcome_message (campaign-level default)
-    5. None (no message sent)
-    """
-    # Priority 1: template_id
-    if config.get('template_id'):
-        # TODO: Load and render template
-        logger.info(f"Would render template (template_id={config['template_id']})")
-        return None  # Placeholder
-    
-    # Priority 2: welcome_message in config
+    """Return welcome message body (same priority as _send_welcome_message). Used by processor for double opt-in."""
+    config = config or {}
+    if getattr(rule, 'initial_reply', None):
+        return rule.initial_reply
     if config.get('welcome_message'):
         return config['welcome_message']
-    
-    # Priority 3: keyword-level default
-    if rule.initial_reply:
-        return rule.initial_reply
-    
-    # Priority 4: campaign-level default
-    if campaign.welcome_message:
+    if getattr(campaign, 'welcome_message', None):
         return campaign.welcome_message
-    
-    # No message
     return None
