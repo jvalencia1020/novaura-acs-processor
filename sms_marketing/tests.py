@@ -219,6 +219,7 @@ class SMSMarketingOptInReplyTests(TestCase):
         campaign.welcome_message = 'Campaign welcome'
         campaign.endpoint = Mock()
         campaign.program = None
+        campaign.follow_up_nurturing_campaign = None  # so _enroll returns None (getattr(Mock, 'x', None) returns Mock)
 
         rule = Mock()
         rule.id = 10
@@ -231,6 +232,7 @@ class SMSMarketingOptInReplyTests(TestCase):
 
         subscriber = Mock()
         subscriber.lead = None
+        subscriber.lead_id = None
         subscriber.endpoint = campaign.endpoint
         subscriber.phone_number = '+15551234567'
 
@@ -239,13 +241,16 @@ class SMSMarketingOptInReplyTests(TestCase):
         with patch('sms_marketing.services.actions.transaction.atomic') as mock_atomic:
             mock_atomic.return_value.__enter__ = Mock(return_value=None)
             mock_atomic.return_value.__exit__ = Mock(return_value=False)
-            with patch('sms_marketing.services.actions.SmsSubscriberCampaignSubscription.objects.get_or_create') as mock_sub:
+            with patch('sms_marketing.services.state.SmsSubscriberCampaignSubscription.objects.get_or_create') as mock_sub:
                 mock_sub.return_value = (Mock(), True)
-                with patch('sms_marketing.services.actions.SmsCampaignEvent.objects.create'):
-                    result = execute_action(campaign, rule, subscriber, message, {})
+                with patch('sms_marketing.services.actions.SMSMarketingMessageSender') as mock_sender_cls:
+                    mock_sender_cls.return_value.send_message.return_value = (True, Mock())
+                    with patch('sms_marketing.services.actions.LeadMatchingService') as mock_lead_svc:
+                        mock_lead_svc.return_value.get_lead_by_phone.return_value = None
+                        result = execute_action(campaign, rule, subscriber, message, {})
 
         self.assertTrue(result.success)
-        # Welcome message resolution should prefer rule.initial_reply over campaign.welcome_message
+        # Welcome message resolution should prefer rule.initial_reply over campaign.welcome_message when config is empty
         welcome = get_welcome_message_for_opt_in(campaign, rule, {})
         self.assertEqual(welcome, 'Rule initial reply')
 
@@ -258,6 +263,7 @@ class SMSMarketingOptInReplyTests(TestCase):
         campaign.confirmation_message = 'Campaign confirm'
         campaign.endpoint = Mock()
         campaign.program = None
+        campaign.follow_up_nurturing_campaign = None
 
         rule = Mock()
         rule.id = 10
@@ -270,6 +276,7 @@ class SMSMarketingOptInReplyTests(TestCase):
 
         subscriber = Mock()
         subscriber.lead = None
+        subscriber.lead_id = None
         subscriber.endpoint = campaign.endpoint
         subscriber.phone_number = '+15551234567'
 
@@ -278,16 +285,19 @@ class SMSMarketingOptInReplyTests(TestCase):
         with patch('sms_marketing.services.actions.transaction.atomic') as mock_atomic:
             mock_atomic.return_value.__enter__ = Mock(return_value=None)
             mock_atomic.return_value.__exit__ = Mock(return_value=False)
-            with patch('sms_marketing.services.actions.SmsSubscriberCampaignSubscription.objects.get_or_create') as mock_sub:
+            with patch('sms_marketing.services.state.SmsSubscriberCampaignSubscription.objects.get_or_create') as mock_sub:
                 mock_sub.return_value = (Mock(), True)
-                with patch('sms_marketing.services.actions.SmsCampaignEvent.objects.create'):
-                    result = execute_action(campaign, rule, subscriber, message, {})
+                with patch('sms_marketing.services.actions.SMSMarketingMessageSender') as mock_sender_cls:
+                    mock_sender_cls.return_value.send_message.return_value = (True, Mock())
+                    with patch('sms_marketing.services.actions.LeadMatchingService') as mock_lead_svc:
+                        mock_lead_svc.return_value.get_lead_by_phone.return_value = None
+                        result = execute_action(campaign, rule, subscriber, message, {})
 
         self.assertTrue(result.success)
 
 
 class SMSMarketingGetWelcomeMessageTests(TestCase):
-    def test_get_welcome_message_for_opt_in_prefers_config_then_rule_then_campaign(self):
+    def test_get_welcome_message_for_opt_in_prefers_rule_then_config_then_campaign(self):
         from sms_marketing.services.actions import get_welcome_message_for_opt_in
 
         campaign = Mock()
@@ -296,15 +306,20 @@ class SMSMarketingGetWelcomeMessageTests(TestCase):
         rule = Mock()
         rule.initial_reply = 'Rule initial reply'
 
+        # Rule initial_reply (actual rule model field) takes precedence
         self.assertEqual(
             get_welcome_message_for_opt_in(campaign, rule, {'welcome_message': 'Config welcome'}),
-            'Config welcome',
+            'Rule initial reply',
         )
         self.assertEqual(
             get_welcome_message_for_opt_in(campaign, rule, {}),
             'Rule initial reply',
         )
         rule.initial_reply = None
+        self.assertEqual(
+            get_welcome_message_for_opt_in(campaign, rule, {'welcome_message': 'Config welcome'}),
+            'Config welcome',
+        )
         self.assertEqual(
             get_welcome_message_for_opt_in(campaign, rule, {}),
             'Campaign welcome',

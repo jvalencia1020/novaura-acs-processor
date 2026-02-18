@@ -803,7 +803,7 @@ def get_welcome_message_for_opt_in(
     rule: SmsKeywordRule,
     config: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
-    """Return welcome message body (same priority as _send_welcome_message). Used by processor for double opt-in."""
+    """Return welcome message body. Priority: rule.initial_reply > config > campaign. Used by processor for double opt-in."""
     config = config or {}
     if getattr(rule, 'initial_reply', None):
         return rule.initial_reply
