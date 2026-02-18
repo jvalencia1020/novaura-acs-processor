@@ -119,6 +119,33 @@ class BulkCampaignProcessor:
 
             if link is None:
                 link = fixed_link
+                # Log when use_opt_in_rule_link was set but we couldn't resolve a per-participant link
+                if campaign.campaign_type in ('drip', 'reminder', 'blast'):
+                    orig_sub_id = getattr(participant, 'originating_subscription_id', None)
+                    if orig_sub_id is not None:
+                        reason = []
+                        if subscription is None:
+                            reason.append('originating_subscription not found')
+                        elif getattr(subscription, 'opt_in_rule_id', None) is None:
+                            reason.append('subscription.opt_in_rule_id is null')
+                        else:
+                            rule = getattr(subscription, 'opt_in_rule', None)
+                            if rule is None:
+                                reason.append('opt_in_rule not found')
+                            elif getattr(rule, 'short_link_id', None) is None:
+                                reason.append('opt_in_rule.short_link_id is null')
+                            else:
+                                reason.append('opt_in_rule.short_link not found')
+                        if fixed_link is None:
+                            reason.append('no schedule/step fixed short_link fallback')
+                        logger.warning(
+                            "use_opt_in_rule_link=True but link not resolved for %s participant_id=%s "
+                            "originating_subscription_id=%s: %s",
+                            campaign.campaign_type,
+                            participant.id,
+                            orig_sub_id,
+                            "; ".join(reason),
+                        )
 
         # Resolve keyword for UTM and body: from rule when we have it, else from originating_subscription
         if rule_for_keyword:
@@ -215,9 +242,24 @@ class BulkCampaignProcessor:
                         message.update_status('failed_final', {'error': 'Max retries exceeded'})
                         continue
 
-                # Get all messages in the group
+                # Get all messages in the group (prefetch link-resolution chain so
+                # participant.originating_subscription → opt_in_rule → short_link is available when sending)
                 related_messages = BulkCampaignMessage.objects.filter(
                     message_group=message.message_group
+                ).select_related(
+                    'campaign',
+                    'campaign__blast_schedule',
+                    'campaign__blast_schedule__short_link',
+                    'participant',
+                    'participant__lead',
+                    'participant__originating_subscription',
+                    'participant__originating_subscription__opt_in_rule',
+                    'participant__originating_subscription__opt_in_rule__short_link',
+                    'participant__originating_subscription__opt_in_rule__keyword',
+                    'drip_message_step',
+                    'drip_message_step__short_link',
+                    'reminder_message',
+                    'reminder_message__short_link',
                 ).order_by(
                     '-message_type',  # Descending order puts 'regular' before 'opt_out_notice'
                     'scheduled_for'  # Then by scheduled time
