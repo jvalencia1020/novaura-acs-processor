@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.conf import settings
 
 from external_models.models.external_references import Account, Campaign
+from external_models.models.nurturing_campaigns import LeadNurturingCampaign
 from external_models.models.communications import ContactEndpoint
 from external_models.models.messages import MessageTemplate
 
@@ -60,6 +61,69 @@ class SmsKeywordCampaignCrmCampaign(models.Model):
 
     def __str__(self):
         return f"{self.sms_campaign.name} → {self.crm_campaign.name}"
+
+    @property
+    def is_current(self):
+        """Alias for is_active (for API backward compatibility)."""
+        return self.is_active
+
+
+class SmsKeywordCampaignNurturingCampaign(models.Model):
+    """
+    Through model for linking SMS campaigns to nurturing (follow-up) campaigns.
+    One SmsKeywordCampaign can have a primary follow-up campaign (is_primary=True)
+    and additional nurturing campaigns (is_primary=False). Use this table to
+    associate additional follow-up campaigns with the same SMS marketing campaign.
+    """
+    sms_campaign = models.ForeignKey(
+        'SmsKeywordCampaign',
+        on_delete=models.CASCADE,
+        related_name='nurturing_campaign_relations',
+    )
+    nurturing_campaign = models.ForeignKey(
+        LeadNurturingCampaign,
+        on_delete=models.CASCADE,
+        related_name='sms_keyword_campaign_relations',
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        help_text='True for the primary follow-up campaign (mirrors follow_up_nurturing_campaign); only one per sms_campaign.',
+    )
+    start_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text='When this mapping became effective. Null means from creation.',
+    )
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text='When this mapping ended. Null means still current.',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Explicitly mark this mapping as active (in use) or inactive (historical).',
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_sms_nurturing_campaigns',
+    )
+
+    class Meta:
+        managed = False
+        db_table = 'sms_keyword_campaign_nurturing_campaign'
+        unique_together = ('sms_campaign', 'nurturing_campaign')
+        indexes = [
+            models.Index(fields=['sms_campaign', 'nurturing_campaign']),
+            models.Index(fields=['is_primary']),
+        ]
+        ordering = ['-start_date', '-assigned_at']
+
+    def __str__(self):
+        return f"{self.sms_campaign.name} → {self.nurturing_campaign.name}"
 
     @property
     def is_current(self):
@@ -203,7 +267,7 @@ class SmsKeywordCampaign(models.Model):
 
     # Follow-up nurturing campaign (string ref to avoid circular import with external_models.models.nurturing_campaigns)
     follow_up_nurturing_campaign = models.ForeignKey(
-        'external_models.LeadNurturingCampaign',
+        LeadNurturingCampaign,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

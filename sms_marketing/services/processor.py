@@ -12,7 +12,14 @@ from external_models.models.nurturing_campaigns import BulkCampaignMessage
 from sms_marketing.models import SmsMessage, SmsSubscriber, SmsCampaignEvent, SmsKeywordCampaign
 from sms_marketing.services.router import SMSMarketingRouter
 from sms_marketing.services.state import SMSMarketingStateManager
-from sms_marketing.services.actions import SMSMarketingActionExecutor
+from sms_marketing.services.actions import (
+    execute_action,
+    ActionExecutionResult,
+    link_lead_for_subscriber,
+    enroll_subscriber_in_follow_up_nurturing,
+    get_welcome_message_for_opt_in,
+)
+from sms_marketing.services.message_sender import SMSMarketingMessageSender
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +30,7 @@ class SMSMarketingProcessor:
     def __init__(self):
         self.router = SMSMarketingRouter()
         self.state_manager = SMSMarketingStateManager()
-        self.action_executor = SMSMarketingActionExecutor()
+        self.message_sender = SMSMarketingMessageSender()
     
     def process_inbound_message(self, message_data: Dict[str, Any]) -> bool:
         """
@@ -121,13 +128,18 @@ class SMSMarketingProcessor:
                         self.state_manager.handle_double_opt_in_confirmation(subscriber, campaign, rule=rule)
                         action_config = (rule.action_config or {}) if rule else {}
                         # Link/create lead so we can enroll in follow-up nurturing campaign
-                        self.action_executor._link_or_create_lead(subscriber, campaign, action_config)
+                        link_lead_for_subscriber(subscriber, campaign, action_config)
                         # Enroll in follow-up nurturing campaign (drip/reminder/blast) if linked
-                        self.action_executor._enroll_in_follow_up_nurturing_campaign_if_applicable(
-                            campaign, subscriber, message, rule=rule
-                        )
-                        if rule:
-                            self.action_executor._send_welcome_message(campaign, rule, subscriber, action_config)
+                        enroll_subscriber_in_follow_up_nurturing(campaign, subscriber, message, rule)
+                        welcome_body = get_welcome_message_for_opt_in(campaign, rule, action_config) if rule else None
+                        if welcome_body:
+                            self.message_sender.send_message(
+                                subscriber=subscriber,
+                                campaign=campaign,
+                                body=welcome_body,
+                                rule=rule,
+                                message_type='welcome',
+                            )
                         
                         # Update message with campaign/rule/subscriber links
                         message.sms_campaign = campaign  # Field name is sms_campaign
@@ -237,23 +249,24 @@ class SMSMarketingProcessor:
                 f"(campaign: {route_result.campaign.id}, rule: {route_result.rule.id})"
             )
             action_config = route_result.rule.action_config or {}
-            execution_result = self.action_executor.execute_action(
+            result = execute_action(
                 route_result.campaign,
                 route_result.rule,
                 subscriber,
                 message,
                 action_config
             )
-            
+            event_type = route_result.rule.action_type if route_result.rule else 'unknown'
+
             logger.info(
                 f"Action execution result for message {message.id}: "
-                f"success={execution_result.success}, event_type={execution_result.event_type}"
+                f"success={result.success}, action_type={event_type}"
             )
-            if not execution_result.success:
+            if not result.success:
                 logger.warning(
-                    f"Action execution failed for message {message.id}: {execution_result.error}"
+                    f"Action execution failed for message {message.id}: {result.message}"
                 )
-            
+
             # Audit: rule was triggered (doc event type)
             self._log_event(
                 endpoint,
@@ -267,26 +280,26 @@ class SMSMarketingProcessor:
                     'selected_rule_id': route_result.rule.id if route_result.rule else None,
                     'rule_id': route_result.rule.id if route_result.rule else None,
                     'action_type': route_result.rule.action_type if route_result.rule else None,
-                    'success': execution_result.success,
-                    'execution_event_type': execution_result.event_type,
-                    'execution_payload': execution_result.payload,
-                    'error': execution_result.error,
+                    'success': result.success,
+                    'execution_event_type': event_type,
+                    'execution_payload': result.data,
+                    'error': result.message if not result.success else None,
                 }
             )
 
             # Log event
             self._log_event(
                 endpoint, route_result.campaign, route_result.rule, subscriber, message,
-                execution_result.event_type,
+                event_type,
                 {
-                    **(execution_result.payload or {}),
+                    **result.data,
                     'keyword_candidate': keyword_candidate,
                     'selected_rule_id': route_result.rule.id if route_result.rule else None,
                 }
             )
-            
+
             # Mark as processed if successful
-            if execution_result.success:
+            if result.success:
                 message.processing_status = 'processed'  # Use 'processed' not 'completed'
                 message.processed_at = timezone.now()
                 message.save(update_fields=['processing_status', 'processed_at'])
@@ -294,11 +307,11 @@ class SMSMarketingProcessor:
             else:
                 message.processing_status = 'failed'
                 message.processed_at = timezone.now()
-                message.error = execution_result.error or 'Action execution failed'
+                message.error = result.message or 'Action execution failed'
                 message.save(update_fields=['processing_status', 'processed_at', 'error'])
                 logger.error(f"Message {message.id} marked as failed: {message.error}")
-            
-            return execution_result.success
+
+            return result.success
             
         except Exception as e:
             logger.exception(f"Error processing inbound message: {e}")
@@ -394,7 +407,7 @@ class SMSMarketingProcessor:
             or (getattr(campaign_context, 'opt_out_message', None) if campaign_context else None)
             or "You have been unsubscribed. You will no longer receive messages."
         )
-        self.action_executor._send_message(
+        self.message_sender.send_message(
             subscriber=subscriber,
             campaign=campaign_context,
             body=opt_out_text,
@@ -427,7 +440,7 @@ class SMSMarketingProcessor:
             or "Reply STOP to opt out. Reply HELP for more information."
         )
 
-        self.action_executor._send_message(
+        self.message_sender.send_message(
             subscriber=subscriber,
             campaign=campaign_context,
             body=help_text,
@@ -524,7 +537,7 @@ class SMSMarketingProcessor:
 
             if reply_body:
                 # Apply variable replacement for plain text replies too.
-                success, outbound_sms = self.action_executor._send_message(
+                success, outbound_sms = self.message_sender.send_message(
                     subscriber=subscriber,
                     campaign=None,
                     body=reply_body,
@@ -642,7 +655,7 @@ class SMSMarketingProcessor:
 
         if rendered_body:
             # Apply variable replacement for plain text replies too (templates are already rendered).
-            success, outbound_sms = self.action_executor._send_message(
+            success, outbound_sms = self.message_sender.send_message(
                 subscriber=subscriber,
                 campaign=campaign,
                 body=rendered_body,
@@ -694,27 +707,28 @@ class SMSMarketingProcessor:
                     self.keyword = type('Keyword', (), {'keyword': ''})()
 
             fallback_rule = FallbackRule(campaign.fallback_action_type, campaign.fallback_action_config)
-            execution_result = self.action_executor.execute_action(
+            result = execute_action(
                 campaign, fallback_rule, subscriber, message, campaign.fallback_action_config or {}
             )
+            event_type = campaign.fallback_action_type or 'unknown'
 
             logger.info(
                 f"Fallback action result for message {message.id}: "
-                f"success={execution_result.success}, event_type={execution_result.event_type}"
+                f"success={result.success}, action_type={event_type}"
             )
 
-            if execution_result.success:
+            if result.success:
                 message.processing_status = 'processed'
                 message.processed_at = timezone.now()
                 message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
             else:
                 message.processing_status = 'failed'
                 message.processed_at = timezone.now()
-                message.error = execution_result.error or 'Fallback action failed'
+                message.error = result.message or 'Fallback action failed'
                 message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error'])
                 logger.error(
                     f"Fallback action failed for message {message.id}, campaign {campaign.id}: "
-                    f"{execution_result.error}"
+                    f"{result.message}"
                 )
 
             self._log_event(
@@ -723,14 +737,14 @@ class SMSMarketingProcessor:
                 None,
                 subscriber,
                 message,
-                execution_result.event_type,
+                event_type,
                 {
-                    **(execution_result.payload or {}),
+                    **result.data,
                     'fallback': True,
                     'reason': 'no_keyword_match',
                 }
             )
-            return execution_result.success
+            return result.success
 
         # No fallback configured - mark as processed (no action needed)
         logger.info(

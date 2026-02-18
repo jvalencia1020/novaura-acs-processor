@@ -1,4 +1,5 @@
 from django.db import models
+from external_models.models.external_references import Lead
 
 
 class SmsSubscriberCampaignSubscription(models.Model):
@@ -22,6 +23,14 @@ class SmsSubscriberCampaignSubscription(models.Model):
         'SmsKeywordCampaign',
         on_delete=models.CASCADE,
         related_name='subscriber_subscriptions',
+    )
+    lead = models.ForeignKey(
+        Lead,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sms_campaign_subscriptions',
+        help_text='Lead (CRM campaign-scoped) for this subscription. Preferred over subscriber.lead for campaign context. Subscriber.lead kept for backfill/existing integrations.',
     )
     status = models.CharField(
         max_length=20,
@@ -75,3 +84,5 @@ class SmsSubscriberCampaignSubscription(models.Model):
 
     def __str__(self):
         return f"{self.subscriber.phone_number} / {self.campaign.name} ({self.status})"
+
+    

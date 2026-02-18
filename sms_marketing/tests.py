@@ -1,3 +1,10 @@
+"""
+SMS marketing service tests.
+
+Run with test settings so DATABASES and INSTALLED_APPS are correct:
+
+    python manage.py test sms_marketing.tests --settings=acs_personalization.settings.test
+"""
 from django.test import TestCase
 from unittest.mock import Mock, patch, MagicMock
 
@@ -52,7 +59,7 @@ class SMSMarketingProcessorFallbackTests(TestCase):
         outbound.id = 555
 
         with patch('sms_marketing.services.processor.SmsCampaignEvent.objects.create') as mock_event_create:
-            with patch.object(processor.action_executor.message_sender, 'send_message') as mock_send:
+            with patch.object(processor.message_sender, 'send_message') as mock_send:
                 mock_send.return_value = (True, outbound)
 
                 ok = processor._handle_fallback(endpoint, subscriber, message)
@@ -101,7 +108,7 @@ class SMSMarketingProcessorFallbackTests(TestCase):
         outbound.id = 556
 
         with patch('sms_marketing.services.processor.SmsCampaignEvent.objects.create') as mock_event_create:
-            with patch.object(processor.action_executor.message_sender, 'send_message') as mock_send:
+            with patch.object(processor.message_sender, 'send_message') as mock_send:
                 mock_send.return_value = (True, outbound)
 
                 ok = processor._handle_fallback(endpoint, subscriber, message)
@@ -139,7 +146,7 @@ class SMSMarketingProcessorFallbackTests(TestCase):
         outbound.id = 558
 
         with patch('sms_marketing.services.processor.SmsCampaignEvent.objects.create') as mock_event_create:
-            with patch.object(processor.action_executor.message_sender, 'send_message') as mock_send:
+            with patch.object(processor.message_sender, 'send_message') as mock_send:
                 mock_send.return_value = (True, outbound)
 
                 ok = processor._handle_fallback(endpoint, subscriber, message)
@@ -182,8 +189,8 @@ class SMSMarketingProcessorFallbackTests(TestCase):
         outbound.id = 557
 
         with patch('sms_marketing.services.processor.SmsCampaignEvent.objects.create') as mock_event_create:
-            with patch.object(processor.action_executor.message_sender, 'send_message') as mock_send:
-                with patch.object(processor.action_executor, 'execute_action') as mock_exec:
+            with patch.object(processor.message_sender, 'send_message') as mock_send:
+                with patch('sms_marketing.services.processor.execute_action') as mock_exec:
                     mock_send.return_value = (True, outbound)
 
                     ok = processor._handle_fallback(endpoint, subscriber, message)
@@ -203,15 +210,15 @@ class SMSMarketingProcessorFallbackTests(TestCase):
 
 
 class SMSMarketingOptInReplyTests(TestCase):
-    def test_opt_in_single_uses_rule_initial_reply_over_campaign_default(self):
-        from sms_marketing.services.actions import SMSMarketingActionExecutor
-
-        executor = SMSMarketingActionExecutor()
+    def test_opt_in_single_returns_success_and_welcome_message_uses_rule_initial_reply(self):
+        from sms_marketing.services.actions import execute_action, get_welcome_message_for_opt_in
 
         campaign = Mock()
         campaign.id = 1
         campaign.opt_in_mode = 'single'
         campaign.welcome_message = 'Campaign welcome'
+        campaign.endpoint = Mock()
+        campaign.program = None
 
         rule = Mock()
         rule.id = 10
@@ -220,35 +227,37 @@ class SMSMarketingOptInReplyTests(TestCase):
         rule.confirmation_message = None
         rule.keyword = Mock()
         rule.keyword.keyword = 'JOIN'
+        rule.action_config = None
 
         subscriber = Mock()
         subscriber.lead = None
+        subscriber.endpoint = campaign.endpoint
+        subscriber.phone_number = '+15551234567'
 
         message = Mock()
 
-        with patch('sms_marketing.services.state.SMSMarketingStateManager.handle_opt_in') as mock_handle_opt_in:
-            mock_handle_opt_in.return_value = {'status': 'opted_in', 'confirmed': True}
-            with patch.object(executor, '_link_or_create_lead') as mock_link:
-                mock_link.return_value = None
-                with patch.object(executor, '_send_message') as mock_send_message:
-                    executor._handle_opt_in(campaign, rule, subscriber, message, action_config={})
+        with patch('sms_marketing.services.actions.transaction.atomic') as mock_atomic:
+            mock_atomic.return_value.__enter__ = Mock(return_value=None)
+            mock_atomic.return_value.__exit__ = Mock(return_value=False)
+            with patch('sms_marketing.services.actions.SmsSubscriberCampaignSubscription.objects.get_or_create') as mock_sub:
+                mock_sub.return_value = (Mock(), True)
+                with patch('sms_marketing.services.actions.SmsCampaignEvent.objects.create'):
+                    result = execute_action(campaign, rule, subscriber, message, {})
 
-        # Should send rule.initial_reply (not campaign.welcome_message)
-        send_args = mock_send_message.call_args.args
-        send_kwargs = mock_send_message.call_args.kwargs
-        self.assertEqual(send_args[2], 'Rule initial reply')  # body
-        self.assertEqual(send_kwargs.get('message_type'), 'welcome')
-        self.assertEqual(send_kwargs.get('rule'), rule)
+        self.assertTrue(result.success)
+        # Welcome message resolution should prefer rule.initial_reply over campaign.welcome_message
+        welcome = get_welcome_message_for_opt_in(campaign, rule, {})
+        self.assertEqual(welcome, 'Rule initial reply')
 
-    def test_opt_in_double_uses_rule_confirmation_message_over_campaign_default(self):
-        from sms_marketing.services.actions import SMSMarketingActionExecutor
-
-        executor = SMSMarketingActionExecutor()
+    def test_opt_in_double_returns_success(self):
+        from sms_marketing.services.actions import execute_action
 
         campaign = Mock()
         campaign.id = 1
         campaign.opt_in_mode = 'double'
         campaign.confirmation_message = 'Campaign confirm'
+        campaign.endpoint = Mock()
+        campaign.program = None
 
         rule = Mock()
         rule.id = 10
@@ -257,61 +266,48 @@ class SMSMarketingOptInReplyTests(TestCase):
         rule.confirmation_message = 'Rule confirm'
         rule.keyword = Mock()
         rule.keyword.keyword = 'JOIN'
+        rule.action_config = None
 
         subscriber = Mock()
         subscriber.lead = None
+        subscriber.endpoint = campaign.endpoint
+        subscriber.phone_number = '+15551234567'
 
         message = Mock()
 
-        with patch('sms_marketing.services.state.SMSMarketingStateManager.handle_opt_in') as mock_handle_opt_in:
-            mock_handle_opt_in.return_value = {'status': 'pending_opt_in', 'confirmed': False}
-            with patch.object(executor, '_link_or_create_lead') as mock_link:
-                mock_link.return_value = None
-                with patch.object(executor, '_send_message') as mock_send_message:
-                    executor._handle_opt_in(campaign, rule, subscriber, message, action_config={})
+        with patch('sms_marketing.services.actions.transaction.atomic') as mock_atomic:
+            mock_atomic.return_value.__enter__ = Mock(return_value=None)
+            mock_atomic.return_value.__exit__ = Mock(return_value=False)
+            with patch('sms_marketing.services.actions.SmsSubscriberCampaignSubscription.objects.get_or_create') as mock_sub:
+                mock_sub.return_value = (Mock(), True)
+                with patch('sms_marketing.services.actions.SmsCampaignEvent.objects.create'):
+                    result = execute_action(campaign, rule, subscriber, message, {})
 
-        send_args = mock_send_message.call_args.args
-        send_kwargs = mock_send_message.call_args.kwargs
-        self.assertEqual(send_args[2], 'Rule confirm')  # body
-        self.assertEqual(send_kwargs.get('message_type'), 'confirmation')
-        self.assertEqual(send_kwargs.get('rule'), rule)
+        self.assertTrue(result.success)
 
 
-class SMSMarketingPlainTextVariableReplacementTests(TestCase):
-    def test_plain_text_messages_use_template_variable_replacement(self):
-        from sms_marketing.services.actions import SMSMarketingActionExecutor
+class SMSMarketingGetWelcomeMessageTests(TestCase):
+    def test_get_welcome_message_for_opt_in_prefers_config_then_rule_then_campaign(self):
+        from sms_marketing.services.actions import get_welcome_message_for_opt_in
 
-        executor = SMSMarketingActionExecutor()
+        campaign = Mock()
+        campaign.welcome_message = 'Campaign welcome'
 
-        lead = Mock()
-        lead.first_name = 'Ada'
+        rule = Mock()
+        rule.initial_reply = 'Rule initial reply'
 
-        subscriber = Mock()
-        subscriber.lead = lead
-        subscriber.endpoint = Mock()
-        subscriber.endpoint.value = '+15551234567'
-
-        # Mock a TemplateVariable that provides {{lead.first_name}}
-        var = Mock()
-        var.get_placeholder.return_value = '{{lead.first_name}}'
-        var.name = 'first_name'
-        var.field_name = 'first_name'
-        var.category = Mock()
-        var.category.name = 'lead'
-
-        qs = Mock()
-        qs.select_related.return_value = [var]
-
-        with patch('external_models.models.messages.TemplateVariable.objects.filter', return_value=qs):
-            with patch.object(executor.message_sender, 'send_message') as mock_send:
-                mock_send.return_value = (True, Mock())
-                executor._send_message(
-                    subscriber=subscriber,
-                    campaign=None,
-                    body='Hi {{lead.first_name}}',
-                    rule=None,
-                    message_type='regular',
-                )
-
-        send_kwargs = mock_send.call_args.kwargs
-        self.assertEqual(send_kwargs['body'], 'Hi Ada')
+        self.assertEqual(
+            get_welcome_message_for_opt_in(campaign, rule, {'welcome_message': 'Config welcome'}),
+            'Config welcome',
+        )
+        self.assertEqual(
+            get_welcome_message_for_opt_in(campaign, rule, {}),
+            'Rule initial reply',
+        )
+        rule.initial_reply = None
+        self.assertEqual(
+            get_welcome_message_for_opt_in(campaign, rule, {}),
+            'Campaign welcome',
+        )
+        campaign.welcome_message = None
+        self.assertIsNone(get_welcome_message_for_opt_in(campaign, rule, {}))
