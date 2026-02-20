@@ -230,17 +230,7 @@ class SMSMarketingActionExecutor:
         except LeadNurturingCampaign.DoesNotExist:
             return ExecutionResult(False, 'error', {'error': 'Nurturing campaign not found'}, 'Nurturing campaign not found')
 
-        # Ensure lead exists (create for CRM campaign if missing) so we can create participant
-        lead = subscriber.lead
-        if not lead:
-            lead = self._link_or_create_lead(subscriber, campaign, action_config or {'create_lead_if_missing': True})
-        if not lead:
-            return ExecutionResult(False, 'error', {'error': 'Subscriber has no linked lead'}, 'Subscriber has no linked lead')
-        created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
-        if not created_by_id:
-            return ExecutionResult(False, 'error', {'error': 'Nurturing campaign has no created_by'}, 'Nurturing campaign has no created_by')
-
-        # Get or create campaign-level subscription so participant can link via originating_subscription (doc item 2)
+        # Get or create campaign-level subscription; use its lead (campaign-scoped)
         now = timezone.now()
         subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
             subscriber=subscriber,
@@ -250,9 +240,17 @@ class SMSMarketingActionExecutor:
                 'opted_in_at': now,
                 'opt_in_message': message,
                 'opt_in_rule': rule,
-                'lead': lead,
             },
         )
+        lead = subscription.lead
+        if not lead:
+            lead = self._link_or_create_lead(subscriber, campaign, action_config or {'create_lead_if_missing': True})
+        if not lead:
+            return ExecutionResult(False, 'error', {'error': 'Subscriber has no linked lead'}, 'Subscriber has no linked lead')
+        created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
+        if not created_by_id:
+            return ExecutionResult(False, 'error', {'error': 'Nurturing campaign has no created_by'}, 'Nurturing campaign has no created_by')
+
         update_sub = []
         if subscription.opt_in_rule_id is None and rule is not None:
             subscription.opt_in_rule = rule
@@ -327,11 +325,12 @@ class SMSMarketingActionExecutor:
             lead_data.setdefault('phone_number', phone_for_lead or subscriber.phone_number)
             lead_data.pop('account', None)
             lead = Lead.objects.create(**lead_data)
-            subscriber.lead = lead
-            subscriber.save()
             SmsSubscriberCampaignSubscription.objects.filter(
                 subscriber=subscriber, campaign=campaign
             ).update(lead=lead)
+            if not subscriber.lead_id:
+                subscriber.lead = lead
+                subscriber.save(update_fields=['lead_id'])
             return ExecutionResult(True, 'message_received', {'lead_id': lead.id, 'lead_created': True})
 
         lead_data = dict(action_config.get('lead_data', {}))
@@ -364,11 +363,12 @@ class SMSMarketingActionExecutor:
                 lead.id,
             )
 
-        subscriber.lead = lead
-        subscriber.save()
         SmsSubscriberCampaignSubscription.objects.filter(
             subscriber=subscriber, campaign=campaign
         ).update(lead=lead)
+        if not subscriber.lead_id:
+            subscriber.lead = lead
+            subscriber.save(update_fields=['lead_id'])
 
         return ExecutionResult(
             True,
@@ -462,16 +462,13 @@ class SMSMarketingActionExecutor:
 
     def _link_or_create_lead(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign, action_config: Dict):
         """
-        Link subscriber to existing lead or create new one.
-        When a lead is set, also updates subscription.lead for (subscriber, campaign) (doc item 1).
-        """
-        if subscriber.lead_id:
-            lead = subscriber.lead
-            SmsSubscriberCampaignSubscription.objects.filter(
-                subscriber=subscriber, campaign=campaign
-            ).update(lead=lead)
-            return lead
+        Resolve the lead for this (subscriber, campaign) and set subscription.lead.
 
+        Leads are campaign-scoped: the same subscriber can have different leads per
+        campaign. We always resolve lead in the context of this SMS campaign's CRM
+        campaign and set SmsSubscriberCampaignSubscription.lead (not subscriber.lead
+        first). Subscriber.lead is only backfilled when null for backward compatibility.
+        """
         crm_campaign = campaign.get_primary_crm_campaign()
         if not crm_campaign:
             rel = getattr(campaign, 'crm_campaign_relations', None)
@@ -485,40 +482,58 @@ class SMSMarketingActionExecutor:
             )
             return None
 
+        lead = None
+
         if not action_config.get('create_lead_if_missing'):
-            lead = self.lead_matching.get_lead_by_phone(subscriber.phone_number)
-            if lead:
-                subscriber.lead = lead
-                subscriber.save()
-                SmsSubscriberCampaignSubscription.objects.filter(
-                    subscriber=subscriber, campaign=campaign
-                ).update(lead=lead)
-            return lead
+            # Find existing lead by this campaign + phone (campaign-scoped)
+            try:
+                from crm.services.lead_dedup import find_existing_lead
+                lead = find_existing_lead(
+                    campaign=crm_campaign,
+                    account=getattr(campaign, 'account', None),
+                    phone_number=subscriber.phone_number,
+                    email=action_config.get('lead_data', {}).get('email'),
+                    lead_type=None,
+                )
+            except ImportError:
+                # Fallback when crm app not available: match by phone only (may be wrong campaign)
+                lead = self.lead_matching.get_lead_by_phone(subscriber.phone_number)
+                if lead and getattr(lead, 'campaign_id', None) != getattr(crm_campaign, 'id', None):
+                    lead = None  # Don't use lead from another campaign
+        else:
+            try:
+                from crm.services.lead_dedup import create_or_update_lead
+                lead_data = action_config.get('lead_data') or {}
+                lead, _ = create_or_update_lead(
+                    campaign=crm_campaign,
+                    account=getattr(campaign, 'account', None),
+                    phone_number=subscriber.phone_number,
+                    email=lead_data.get('email'),
+                    lead_data=lead_data,
+                    lead_type=None,
+                )
+            except (ImportError, ValueError):
+                from external_models.models.external_references import Lead
+                phone_for_lead = self._normalize_phone_for_lead_storage(subscriber.phone_number)
+                lead = Lead.objects.create(
+                    phone_number=phone_for_lead or subscriber.phone_number,
+                    campaign=crm_campaign,
+                )
 
-        try:
-            from crm.services.lead_dedup import create_or_update_lead
-            lead_data = action_config.get('lead_data') or {}
-            lead, _ = create_or_update_lead(
-                campaign=crm_campaign,
-                account=getattr(campaign, 'account', None),
-                phone_number=subscriber.phone_number,
-                email=lead_data.get('email'),
-                lead_data=lead_data,
-                lead_type=None,
-            )
-        except (ImportError, ValueError):
-            from external_models.models.external_references import Lead
-            phone_for_lead = self._normalize_phone_for_lead_storage(subscriber.phone_number)
-            lead = Lead.objects.create(
-                phone_number=phone_for_lead or subscriber.phone_number,
-                campaign=crm_campaign,
-            )
+        if not lead:
+            return None
 
-        subscriber.lead = lead
-        subscriber.save()
+        # Always set subscription.lead for this (subscriber, campaign) – campaign-scoped
         SmsSubscriberCampaignSubscription.objects.filter(
             subscriber=subscriber, campaign=campaign
         ).update(lead=lead)
+
+        # Backfill subscriber.lead only when null so code that reads subscriber.lead
+        # still gets a lead; we do not overwrite with another campaign's lead
+        if not subscriber.lead_id:
+            subscriber.lead = lead
+            subscriber.save(update_fields=['lead_id'])
+
         return lead
 
     def _enroll_in_follow_up_nurturing_campaign_if_applicable(
@@ -538,8 +553,18 @@ class SMSMarketingActionExecutor:
         if not nurturing_campaign:
             return None
 
-        # Ensure lead exists so we can enroll (create for CRM campaign if missing)
-        lead = subscriber.lead
+        # Use campaign-scoped lead (subscription.lead), not subscriber.lead
+        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
+            subscriber=subscriber,
+            campaign=campaign,
+            defaults={
+                'status': 'opted_in',
+                'opted_in_at': timezone.now(),
+                'opt_in_message': message,
+                'opt_in_rule': rule,
+            },
+        )
+        lead = subscription.lead
         if not lead:
             lead = self._link_or_create_lead(subscriber, campaign, {'create_lead_if_missing': True})
         if not lead:
@@ -550,19 +575,11 @@ class SMSMarketingActionExecutor:
         if not created_by_id:
             return None
 
-        # Get or create the campaign-level subscription; backfill subscription.lead (doc item 1/2)
-        now = timezone.now()
-        subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
-            subscriber=subscriber,
-            campaign=campaign,
-            defaults={
-                'status': 'opted_in',
-                'opted_in_at': now,
-                'opt_in_message': message,
-                'opt_in_rule': rule,
-                'lead': lead,
-            },
-        )
+        # Ensure subscription has lead set (link_or_create_lead already updates it; sync if we had to create)
+        if subscription.lead_id != lead.id:
+            subscription.lead = lead
+            subscription.save(update_fields=['lead_id'])
+
         update_sub = []
         if rule is not None and subscription.opt_in_rule_id is None:
             subscription.opt_in_rule = rule
