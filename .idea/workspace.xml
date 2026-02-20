@@ -292,6 +292,7 @@
       <workItem from="1771171109523" duration="19411000" />
       <workItem from="1771365012261" duration="8971000" />
       <workItem from="1771444982541" duration="1891000" />
+      <workItem from="1771617428020" duration="440000" />
     </task>
     <servers />
   </component>
@@ -461,9 +462,9 @@
     </watches-manager>
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/novaura_acs_processor$reprocess_sms_messages.coverage" NAME="reprocess_sms_messages Coverage Results" MODIFIED="1771347895748" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/novaura_acs_processor$reprocess_sms_messages.coverage" NAME="reprocess_sms_messages Coverage Results" MODIFIED="1771617446247" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
     <SUITE FILE_PATH="coverage/novaura_acs_processor$process_bulk_campaigns.coverage" NAME="process_bulk_campaigns Coverage Results" MODIFIED="1770757190101" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
-    <SUITE FILE_PATH="coverage/novaura_acs_processor$process_due_messages.coverage" NAME="process_due_messages Coverage Results" MODIFIED="1771444987953" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
-    <SUITE FILE_PATH="coverage/novaura_acs_processor$sms_marketing_messages.coverage" NAME="sms_marketing_messages Coverage Results" MODIFIED="1771426447848" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/novaura_acs_processor$process_due_messages.coverage" NAME="process_due_messages Coverage Results" MODIFIED="1771617430355" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/novaura_acs_processor$sms_marketing_messages.coverage" NAME="sms_marketing_messages Coverage Results" MODIFIED="1771617439618" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>

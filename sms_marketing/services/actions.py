@@ -321,8 +321,8 @@ class SMSMarketingActionExecutor:
                     'Campaign has no linked CRM campaign'
                 )
             lead_data.setdefault('campaign', crm_campaign)
-            phone_for_lead = self._normalize_phone_for_lead_storage(subscriber.phone_number)
-            lead_data.setdefault('phone_number', phone_for_lead or subscriber.phone_number)
+            phone_formatted = self._normalize_phone_for_lead_storage(subscriber.phone_number)
+            lead_data.setdefault('phone_number', phone_formatted or subscriber.phone_number)
             lead_data.pop('account', None)
             lead = Lead.objects.create(**lead_data)
             SmsSubscriberCampaignSubscription.objects.filter(
@@ -334,7 +334,8 @@ class SMSMarketingActionExecutor:
             return ExecutionResult(True, 'message_received', {'lead_id': lead.id, 'lead_created': True})
 
         lead_data = dict(action_config.get('lead_data', {}))
-        phone_number = subscriber.phone_number
+        phone_formatted = self._normalize_phone_for_lead_storage(subscriber.phone_number)
+        phone_number = phone_formatted or subscriber.phone_number
         email = lead_data.get('email')
         crm_campaign = campaign.get_primary_crm_campaign()
         if not crm_campaign:
@@ -447,18 +448,25 @@ class SMSMarketingActionExecutor:
         )
     
     # Helper methods
-    def _normalize_phone_for_lead_storage(self, phone_number: Optional[str]):
+    def _normalize_phone_for_lead_storage(self, phone_number: Optional[str]) -> Optional[str]:
         """
-        Return phone number in lead storage format (e.g. XXX-XXX-XXXX) if utils.phone is available.
-        Returns None if normalization is not available (caller should use raw number as fallback).
+        Return phone number in lead storage format (XXX-XXX-XXXX, e.g. 203-111-3333).
+        Uses utils.phone when available; otherwise falls back to local formatting for US 10/11-digit numbers.
         """
-        if not phone_number:
+        if not phone_number or not isinstance(phone_number, str):
             return None
         try:
             from utils.phone import normalize_phone_for_lead_storage
             return normalize_phone_for_lead_storage(phone_number)
         except ImportError:
-            return None
+            pass
+        # Fallback: format to XXX-XXX-XXXX for US numbers
+        digits = "".join(c for c in str(phone_number).strip() if c.isdigit())
+        if len(digits) == 11 and digits.startswith("1"):
+            digits = digits[1:]
+        if len(digits) == 10:
+            return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+        return phone_number.strip() or None
 
     def _link_or_create_lead(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign, action_config: Dict):
         """
@@ -504,19 +512,20 @@ class SMSMarketingActionExecutor:
             try:
                 from crm.services.lead_dedup import create_or_update_lead
                 lead_data = action_config.get('lead_data') or {}
+                phone_formatted = self._normalize_phone_for_lead_storage(subscriber.phone_number)
                 lead, _ = create_or_update_lead(
                     campaign=crm_campaign,
                     account=getattr(campaign, 'account', None),
-                    phone_number=subscriber.phone_number,
+                    phone_number=phone_formatted or subscriber.phone_number,
                     email=lead_data.get('email'),
                     lead_data=lead_data,
                     lead_type=None,
                 )
             except (ImportError, ValueError):
                 from external_models.models.external_references import Lead
-                phone_for_lead = self._normalize_phone_for_lead_storage(subscriber.phone_number)
+                phone_formatted = self._normalize_phone_for_lead_storage(subscriber.phone_number)
                 lead = Lead.objects.create(
-                    phone_number=phone_for_lead or subscriber.phone_number,
+                    phone_number=phone_formatted or subscriber.phone_number,
                     campaign=crm_campaign,
                 )
 
