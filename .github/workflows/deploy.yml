@@ -114,7 +114,7 @@ jobs:
           TF_VAR_rds_security_group_id: ${{ secrets.RDS_SECURITY_GROUP_ID }}
           TF_VAR_twilio_credentials_arn: ${{ secrets.TWILIO_CREDENTIALS_ARN }}
           TF_VAR_bland_ai_api_key_arn: ${{ secrets.BLAND_AI_API_KEY_ARN }}
-          TF_VAR_vpc_endpoint_ingress_security_group_ids: ${{ secrets.VPC_ENDPOINT_INGRESS_SECURITY_GROUP_IDS == '' && '[]' || secrets.VPC_ENDPOINT_INGRESS_SECURITY_GROUP_IDS }}
+          # VPC/subnet/SG IDs come from terraform.tfvars (shared networking from main Terraform repo)
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
@@ -132,4 +132,4 @@ jobs:
           TF_VAR_rds_security_group_id: ${{ secrets.RDS_SECURITY_GROUP_ID }}
           TF_VAR_twilio_credentials_arn: ${{ secrets.TWILIO_CREDENTIALS_ARN }}
           TF_VAR_bland_ai_api_key_arn: ${{ secrets.BLAND_AI_API_KEY_ARN }}
-          TF_VAR_vpc_endpoint_ingress_security_group_ids: ${{ secrets.VPC_ENDPOINT_INGRESS_SECURITY_GROUP_IDS == '' && '[]' || secrets.VPC_ENDPOINT_INGRESS_SECURITY_GROUP_IDS }} 
+          # VPC/subnet/SG IDs come from terraform.tfvars (shared networking from main Terraform repo) 
