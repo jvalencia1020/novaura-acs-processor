@@ -4,7 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="" />
+    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/ecs.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/ecs.tf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/main.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/main.tf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/security.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/security.tf" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/terraform/vpc.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/vpc.tf" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -28,7 +34,7 @@
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
     &quot;Python.process_bulk_campaigns.executor&quot;: &quot;Run&quot;,
-    &quot;Python.process_due_messages.executor&quot;: &quot;Run&quot;,
+    &quot;Python.process_due_messages.executor&quot;: &quot;Debug&quot;,
     &quot;Python.reprocess_sms_messages.executor&quot;: &quot;Run&quot;,
     &quot;Python.run_bulk_campaign_processor.executor&quot;: &quot;Run&quot;,
     &quot;Python.sms_marketing_messages.executor&quot;: &quot;Run&quot;,
@@ -54,7 +60,7 @@
       <recent name="$PROJECT_DIR$/sms_marketing" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.reprocess_sms_messages">
+  <component name="RunManager" selected="Python.process_due_messages">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
@@ -115,6 +121,7 @@
         <env name="DJANGO_SETTINGS_MODULE" value="acs_personalization.settings.dev" />
       </envs>
       <option name="SDK_HOME" value="" />
+      <option name="SDK_NAME" value="Python 3.14 (novaura-acs-processor)" />
       <option name="WORKING_DIRECTORY" value="" />
       <option name="IS_MODULE_SDK" value="false" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
@@ -262,16 +269,15 @@
       <item itemvalue="Python.process_bulk_campaigns" />
       <item itemvalue="Python.process_due_messages" />
       <item itemvalue="Python.prod" />
+      <item itemvalue="Python.reprocess_sms_messages" />
       <item itemvalue="Python.run_bulk_campaign_processor" />
       <item itemvalue="Python.sms_marketing_messages" />
-      <item itemvalue="Python.reprocess_sms_messages" />
       <item itemvalue="Python.worker" />
     </list>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.29346.308" />
         <option value="bundled-python-sdk-ca5e2b39c7df-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.308" />
       </set>
     </attachedChunks>
@@ -292,7 +298,7 @@
       <workItem from="1771171109523" duration="19411000" />
       <workItem from="1771365012261" duration="8971000" />
       <workItem from="1771444982541" duration="1891000" />
-      <workItem from="1771617428020" duration="440000" />
+      <workItem from="1771617428020" duration="1971000" />
     </task>
     <servers />
   </component>
@@ -359,11 +365,6 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/shared_services/message_validation_service.py</url>
-          <line>81</line>
-          <option name="timeStamp" value="72" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/shared_services/message_validation_service.py</url>
           <line>192</line>
           <option name="timeStamp" value="78" />
         </line-breakpoint>
@@ -404,7 +405,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/sms_marketing/services/actions.py</url>
-          <line>707</line>
+          <line>716</line>
           <option name="timeStamp" value="106" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -462,9 +463,9 @@
     </watches-manager>
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/novaura_acs_processor$reprocess_sms_messages.coverage" NAME="reprocess_sms_messages Coverage Results" MODIFIED="1771617446247" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/novaura_acs_processor$reprocess_sms_messages.coverage" NAME="reprocess_sms_messages Coverage Results" MODIFIED="1771620998592" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
     <SUITE FILE_PATH="coverage/novaura_acs_processor$process_bulk_campaigns.coverage" NAME="process_bulk_campaigns Coverage Results" MODIFIED="1770757190101" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
     <SUITE FILE_PATH="coverage/novaura_acs_processor$process_due_messages.coverage" NAME="process_due_messages Coverage Results" MODIFIED="1771617430355" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
-    <SUITE FILE_PATH="coverage/novaura_acs_processor$sms_marketing_messages.coverage" NAME="sms_marketing_messages Coverage Results" MODIFIED="1771617439618" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/novaura_acs_processor$sms_marketing_messages.coverage" NAME="sms_marketing_messages Coverage Results" MODIFIED="1771621005604" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>

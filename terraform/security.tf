@@ -1,7 +1,7 @@
 resource "aws_security_group" "ecs_service" {
   name        = "novaura-acs-ecs-service"
   description = "Security group for Novaura ACS ECS services"
-  vpc_id      = data.aws_vpc.existing.id
+  vpc_id      = var.vpc_id
 
   ingress {
     from_port   = 0

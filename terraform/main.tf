@@ -135,8 +135,23 @@ variable "bland_ai_api_key_arn" {
   type        = string
 }
 
-variable "vpc_endpoint_ingress_security_group_ids" {
-  description = "Additional security group IDs allowed to reach VPC endpoints (HTTPS 443). This project's ECS and link-runtime ECS are already allowed."
+# VPC and subnets (from shared networking stack / main Terraform repo or SSM)
+variable "vpc_id" {
+  description = "VPC ID where ECS and shared endpoints run (from main Terraform repo or SSM)"
+  type        = string
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs for ECS tasks (from main Terraform repo or SSM)"
   type        = list(string)
-  default     = []
+}
+
+variable "public_subnet_ids" {
+  description = "Public (private-nat) subnet IDs for ECS workers that need outbound internet (from main Terraform repo or SSM)"
+  type        = list(string)
+}
+
+variable "vpc_endpoints_security_group_id" {
+  description = "Security group ID for VPC endpoints (from main Terraform repo or SSM). Used for reference/output only; endpoints are managed in the shared repo."
+  type        = string
 } 

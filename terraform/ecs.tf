@@ -412,7 +412,7 @@ resource "aws_ecs_service" "bulk_campaign_scheduler_service" {
   launch_type     = "FARGATE"
   
   network_configuration {
-    subnets          = local.private_subnet_ids
+    subnets          = var.private_subnet_ids
     security_groups = [aws_security_group.ecs_service.id]
   }
   
@@ -430,7 +430,7 @@ resource "aws_ecs_service" "journey_scheduler_service" {
   launch_type     = "FARGATE"
   
   network_configuration {
-    subnets          = local.private_subnet_ids
+    subnets          = var.private_subnet_ids
     security_groups = [aws_security_group.ecs_service.id]
   }
   
@@ -448,7 +448,7 @@ resource "aws_ecs_service" "journey_worker_service" {
   launch_type     = "FARGATE"
   
   network_configuration {
-    subnets          = concat(data.aws_subnets.private.ids, data.aws_subnets.public.ids)
+    subnets          = concat(var.private_subnet_ids, var.public_subnet_ids)
     security_groups  = [aws_security_group.ecs_service.id]
     assign_public_ip = false
   }
@@ -467,7 +467,7 @@ resource "aws_ecs_service" "bulk_campaign_worker_service" {
   launch_type     = "FARGATE"
   
   network_configuration {
-    subnets          = data.aws_subnets.public.ids  # Using only the private-nat subnets for outbound internet access
+    subnets          = var.public_subnet_ids # Using only the private-nat subnets for outbound internet access
     security_groups  = [aws_security_group.ecs_service.id]
     assign_public_ip = false
   }
@@ -487,7 +487,7 @@ resource "aws_ecs_service" "communication_processor_worker_service" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets         = data.aws_subnets.public.ids
+    subnets         = var.public_subnet_ids
     security_groups = [aws_security_group.ecs_service.id]
     assign_public_ip = true
   }
@@ -509,7 +509,7 @@ resource "aws_ecs_service" "sms_marketing_worker_service" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets         = data.aws_subnets.public.ids
+    subnets         = var.public_subnet_ids
     security_groups = [aws_security_group.ecs_service.id]
     assign_public_ip = true
   }
