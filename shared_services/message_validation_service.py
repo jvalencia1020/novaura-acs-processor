@@ -1,6 +1,7 @@
 import logging
 from django.utils import timezone
 from external_models.models.nurturing_campaigns import BulkCampaignMessage
+from shared_services.email.email_dispatch import effective_email_subject
 
 logger = logging.getLogger(__name__)
 
@@ -275,24 +276,23 @@ class MessageValidationService:
             logger.exception(f"Voice validation failed: {e}")
             return False
 
+    def _resolve_email_config_for_validation(self, campaign, regular_message):
+        """EmailConfig used for from-address and subject (matches bulk send resolution)."""
+        if regular_message.message_type in ('opt_out_notice', 'opt_out_confirmation'):
+            return campaign.email_config
+        return regular_message.get_effective_email_config()
+
     def _validate_email_requirements(self, campaign, regular_message, opt_out_message=None) -> bool:
         """Validates email-specific requirements"""
         try:
-            # Check for valid from address
-            from_address = None
-            if regular_message.message_type == 'opt_out_notice':
-                if campaign.email_config:
-                    from_address = campaign.email_config.get_from_address()
-            elif regular_message.message_type == 'opt_out_confirmation':
-                if campaign.email_config:
-                    from_address = campaign.email_config.get_from_address()
-            elif campaign.campaign_type == 'drip' and regular_message.drip_message_step:
-                from_address = regular_message.drip_message_step.email_config.get_from_address()
-            elif campaign.campaign_type == 'reminder' and regular_message.reminder_message:
-                from_address = regular_message.reminder_message.email_config.get_from_address()
-            else:
-                from_address = campaign.email_config.get_from_address()
+            email_config = self._resolve_email_config_for_validation(campaign, regular_message)
+            if not email_config:
+                logger.warning(
+                    f"No email_config found for message {regular_message.id} (campaign {campaign.id})"
+                )
+                return False
 
+            from_address = email_config.get_from_email()
             if not from_address:
                 logger.warning(f"No valid from address found for message {regular_message.id}")
                 return False
@@ -302,8 +302,11 @@ class MessageValidationService:
                 logger.warning(f"From address {from_address} is not properly mapped to campaign {campaign.id}")
                 return False
 
-            # Check for valid subject
-            if not campaign.subject:
+            # Subject: optional campaign.subject (CRM may add it), else EmailConfig / hosted template — mirrors send path
+            subject = (getattr(campaign, 'subject', None) or '').strip() or effective_email_subject(
+                email_config
+            )
+            if not subject:
                 logger.warning(f"No subject found for message {regular_message.id}")
                 return False
 

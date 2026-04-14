@@ -29,13 +29,13 @@ def load_credentials_for_email_settings(email_settings) -> Dict[str, Any]:
 
 
 def effective_email_subject(email_config: 'EmailConfig') -> str:
-    """Subject for send: EmailConfig.subject wins, else version.subject_text for outbound_acs."""
+    """Subject for send: EmailConfig.subject wins, else version.subject_text for outbound / hosted."""
     subj = (email_config.subject or '').strip()
     if subj:
         return subj
-    if (
-        email_config.email_content_mode == 'outbound_acs'
-        and getattr(email_config, 'hosted_template_version_id', None)
+    mode = getattr(email_config, 'email_content_mode', None)
+    if mode in ('outbound_acs', 'hosted_mailgun') and getattr(
+        email_config, 'hosted_template_version_id', None
     ):
         ver = email_config.hosted_template_version
         if ver:

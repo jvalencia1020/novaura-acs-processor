@@ -676,135 +676,142 @@ class BulkCampaignMessage(models.Model):
 
         return self.campaign.can_send_message(self.participant)
 
-    def get_message_content(self, extra_context=None):
-        """Get the message content based on campaign type and message step with enhanced variable replacement.
-        extra_context: optional dict merged into context before variable replacement (e.g. {'link': {'short_link': resolved_url}}).
-        """
-        # Prepare context for variable replacement
-        lead = self.participant.lead
+    def get_effective_email_config(self):
+        """EmailConfig for email-channel bulk sends (drip step, reminder message, or campaign)."""
         campaign = self.campaign
-        context = {
-            'lead': {
-                'first_name': lead.first_name or '',
-                'last_name': lead.last_name or '',
-                'email': lead.email or '',
-                'phone_number': lead.phone_number or '',
-                'company': getattr(lead, 'company_name', '') or '',
-                'title': getattr(lead, 'title', '') or '',
-                'channel': getattr(lead, 'channel', '') or '',
-                'source': getattr(lead, 'source', '') or '',
-                'lead_type': getattr(lead, 'lead_type', '') or '',
-                'score': getattr(lead, 'score', 0) or 0,
-                'conversion_probability': getattr(lead, 'conversion_probability', 0) or 0,
-                'is_qualified': getattr(lead, 'is_qualified', False) or False,
-                'is_disqualified': getattr(lead, 'is_disqualified', False) or False,
-            },
-            'campaign': {
-                'name': campaign.name or '',
-                'type': campaign.campaign_type or '',
-                'channel': campaign.channel or '',
-                'description': getattr(campaign, 'description', '') or '',
-            }
-        }
-        if extra_context:
-            for key, value in extra_context.items():
-                context[key] = value
+        if campaign.channel != 'email':
+            return None
+        if self.message_type != 'regular':
+            return None
+        if campaign.campaign_type == 'drip' and self.drip_message_step:
+            return self.drip_message_step.email_config
+        if campaign.campaign_type == 'reminder' and self.reminder_message:
+            return self.reminder_message.email_config
+        return campaign.email_config
 
-        # Handle opt-out messages
+    def get_message_content(self, extra_context=None):
+        """Resolve message body for bulk sends.
+
+        Email ``outbound_acs`` / legacy ``hosted_mailgun`` uses ``hosted_template_version`` and
+        ``replace_template_variables`` (same merge rules as ``send_from_email_config``). Inline
+        channel configs use ``MessageTemplate.replace_variables`` / ``replace_variables`` (link
+        keyword fallbacks for raw strings).
+
+        extra_context: merged into template context (e.g. ``link`` / ``keyword`` from the processor).
+        """
+        from shared_services.template_variable_render import (
+            build_nested_template_context,
+            replace_template_variables,
+        )
+
+        from .outbound_email_template import OutboundEmailTemplateVersion
+
+        campaign = self.campaign
+        lead = self.participant.lead
+
+        # Opt-out copy: keep replace_variables for {{link.short_link}} fallbacks not driven by TemplateVariable rows.
+        opt_ctx = build_nested_template_context(
+            lead=lead,
+            nurturing_campaign=campaign,
+            sender_user=getattr(campaign, 'created_by', None),
+            extra=extra_context,
+        )
         if self.message_type == 'opt_out_notice':
-            content = campaign.initial_opt_out_notice or ''
-            return replace_variables(content, context)
-        elif self.message_type == 'opt_out_confirmation':
-            content = campaign.opt_out_message or ''
-            return replace_variables(content, context)
+            return replace_variables(campaign.initial_opt_out_notice or '', opt_ctx)
+        if self.message_type == 'opt_out_confirmation':
+            return replace_variables(campaign.opt_out_message or '', opt_ctx)
+        if self.message_type != 'regular':
+            return ''
 
-        # Get content based on campaign type
-        content = ""
-        
-        if self.campaign.campaign_type == 'drip' and self.drip_message_step:
-            # Get the channel config for the message step
+        context = opt_ctx
+
+        def _try_outbound_acs_email_body(email_config: EmailConfig):
+            if email_config.email_content_mode not in (
+                EmailConfig.MODE_OUTBOUND_ACS,
+                EmailConfig.MODE_HOSTED_MAILGUN,
+            ):
+                return False, None
+            ver = email_config.hosted_template_version
+            if not ver or ver.status != OutboundEmailTemplateVersion.STATUS_APPROVED:
+                logger.error(
+                    'Outbound ACS email misconfigured: hosted_template_version missing or not '
+                    'approved (email_config_id=%s nurturing_campaign_id=%s)',
+                    getattr(email_config, 'pk', None),
+                    campaign.id,
+                )
+                return True, None
+            return True, replace_template_variables(ver.html_body or '', context)
+
+        def _inline_channel_body(channel_config):
+            if getattr(channel_config, 'template_id', None):
+                return channel_config.template.replace_variables(context)
+            raw = (getattr(channel_config, 'content', None) or '').strip()
+            if raw:
+                return replace_variables(raw, context)
+            return None
+
+        if campaign.campaign_type == 'drip' and self.drip_message_step:
             channel_config = self.drip_message_step.get_channel_config()
             if not channel_config:
-                logger.error(f"No channel config found for drip message step {self.drip_message_step.id}")
-                return ""
-                
-            # Use template if available, otherwise use content
-            if channel_config.template:
-                content = channel_config.template.content or ""
-                logger.debug(f"Using template content for drip step: {content[:100]}...")
-            elif channel_config.content:
-                content = channel_config.content or ""
-                logger.debug(f"Using direct content for drip step: {content[:100]}...")
-            else:
-                logger.error(f"No content found in drip message step {self.drip_message_step.id}")
-                return ""
-                
-        elif self.campaign.campaign_type == 'reminder' and self.reminder_message:
-            # Get the channel config for the reminder message
-            channel_config = None
-            if campaign.channel == 'email' and self.reminder_message.email_config:
-                channel_config = self.reminder_message.email_config
-            elif campaign.channel == 'sms' and self.reminder_message.sms_config:
-                channel_config = self.reminder_message.sms_config
-            elif campaign.channel == 'voice' and self.reminder_message.voice_config:
-                channel_config = self.reminder_message.voice_config
-            elif campaign.channel == 'chat' and self.reminder_message.chat_config:
-                channel_config = self.reminder_message.chat_config
-                
-            if not channel_config:
-                logger.error(f"No channel config found for reminder message {self.reminder_message.id}")
-                return ""
-                
-            # Use template if available, otherwise use content
-            if channel_config.template:
-                content = channel_config.template.content or ""
-                logger.debug(f"Using template content for reminder: {content[:100]}...")
-            elif channel_config.content:
-                content = channel_config.content or ""
-                logger.debug(f"Using direct content for reminder: {content[:100]}...")
-            else:
-                logger.error(f"No content found in reminder message {self.reminder_message.id}")
-                return ""
-                
-        else:
-            # For other campaign types, get the appropriate channel config
-            channel_config = None
-            if campaign.channel == 'email' and campaign.email_config:
-                channel_config = campaign.email_config
-            elif campaign.channel == 'sms' and campaign.sms_config:
-                channel_config = campaign.sms_config
-            elif campaign.channel == 'voice' and campaign.voice_config:
-                channel_config = campaign.voice_config
-            elif campaign.channel == 'chat' and campaign.chat_config:
-                channel_config = campaign.chat_config
-                
-            if not channel_config:
-                logger.error(f"No channel config found for campaign {campaign.id}")
-                return ""
-                
-            # Use template if available, otherwise use content
-            if channel_config.template:
-                content = channel_config.template.content or ""
-                logger.debug(f"Using template content for campaign: {content[:100]}...")
-            elif channel_config.content:
-                content = channel_config.content or ""
-                logger.debug(f"Using direct content for campaign: {content[:100]}...")
-            else:
-                logger.error(f"No content found in campaign {campaign.id}")
-                return ""
-        
-        # Apply variable replacement (context may include extra_context e.g. link.short_link)
-        if content:
-            processed_content = replace_variables(content, context)
+                logger.error(
+                    'No channel config found for drip message step %s',
+                    self.drip_message_step.id,
+                )
+                return ''
+            if campaign.channel == 'email' and isinstance(channel_config, EmailConfig):
+                is_out, body = _try_outbound_acs_email_body(channel_config)
+                if is_out:
+                    return body if body is not None else ''
+            merged = _inline_channel_body(channel_config)
+            if merged is not None:
+                return merged
+            logger.error(
+                'No content found in drip message step %s',
+                self.drip_message_step.id,
+            )
+            return ''
 
-            # Check if variables were replaced
-            if "{{" in processed_content and "}}" in processed_content:
-                # Try one more time with a more aggressive approach
-                processed_content = replace_variables(processed_content, context)
+        if campaign.campaign_type == 'reminder' and self.reminder_message:
+            rm = self.reminder_message
+            if campaign.channel == 'email' and rm.email_config:
+                is_out, body = _try_outbound_acs_email_body(rm.email_config)
+                if is_out:
+                    return body if body is not None else ''
+            channel_config = rm.get_channel_config()
+            if channel_config:
+                merged = _inline_channel_body(channel_config)
+                if merged is not None:
+                    return merged
+            logger.error('No content found in reminder message %s', rm.id)
+            return ''
 
-            return processed_content
+        # Blast, journey, and other types: campaign-level channel config (+ legacy campaign.content).
+        if campaign.channel == 'email' and campaign.email_config:
+            is_out, body = _try_outbound_acs_email_body(campaign.email_config)
+            if is_out:
+                return body if body is not None else ''
 
-        return ""
+        channel_config = None
+        if campaign.channel == 'email' and campaign.email_config:
+            channel_config = campaign.email_config
+        elif campaign.channel == 'sms' and campaign.sms_config:
+            channel_config = campaign.sms_config
+        elif campaign.channel == 'voice' and campaign.voice_config:
+            channel_config = campaign.voice_config
+        elif campaign.channel == 'chat' and campaign.chat_config:
+            channel_config = campaign.chat_config
+
+        if channel_config:
+            merged = _inline_channel_body(channel_config)
+            if merged is not None:
+                return merged
+
+        raw_campaign = (getattr(campaign, 'content', None) or '').strip()
+        if raw_campaign:
+            return replace_variables(raw_campaign, context)
+
+        logger.error('No content found in campaign %s', campaign.id)
+        return ''
 
     @classmethod
     def check_existing_message(cls, participant, campaign, message_type, drip_message_step=None, reminder_message=None):
