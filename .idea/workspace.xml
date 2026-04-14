@@ -4,7 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="" />
+    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/channel_configs.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/channel_configs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/communications.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/communications.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/message_delivery/message_delivery_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/message_delivery/message_delivery_service.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -25,27 +34,27 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Python.process_bulk_campaigns.executor&quot;: &quot;Run&quot;,
-    &quot;Python.process_due_messages.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.reprocess_sms_messages.executor&quot;: &quot;Run&quot;,
-    &quot;Python.run_bulk_campaign_processor.executor&quot;: &quot;Run&quot;,
-    &quot;Python.sms_marketing_messages.executor&quot;: &quot;Run&quot;,
-    &quot;Python.worker.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/link_tracking&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Python.process_bulk_campaigns.executor": "Run",
+    "Python.process_due_messages.executor": "Run",
+    "Python.reprocess_sms_messages.executor": "Run",
+    "Python.run_bulk_campaign_processor.executor": "Run",
+    "Python.sms_marketing_messages.executor": "Run",
+    "Python.worker.executor": "Run",
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "ai.playground.ignore.import.keys.banner.in.settings": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/link_tracking",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/link_tracking" />
@@ -54,7 +63,7 @@
       <recent name="$PROJECT_DIR$/sms_marketing" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.process_due_messages">
+  <component name="RunManager" selected="Python.sms_marketing_messages">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
@@ -309,7 +318,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>452</line>
+          <line>453</line>
           <option name="timeStamp" value="45" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -329,7 +338,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>926</line>
+          <line>927</line>
           <option name="timeStamp" value="49" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -369,7 +378,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>934</line>
+          <line>935</line>
           <option name="timeStamp" value="82" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -384,7 +393,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>948</line>
+          <line>949</line>
           <option name="timeStamp" value="89" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -419,12 +428,12 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>424</line>
+          <line>425</line>
           <option name="timeStamp" value="114" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>313</line>
+          <line>314</line>
           <option name="timeStamp" value="122" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -444,7 +453,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>88</line>
+          <line>89</line>
           <option name="timeStamp" value="127" />
         </line-breakpoint>
       </breakpoints>

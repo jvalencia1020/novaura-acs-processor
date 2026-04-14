@@ -512,6 +512,61 @@ class ContactEndpoint(models.Model):
             return False
 
 
+class ContactEndpointEmailSettings(models.Model):
+    """
+    Email provider configuration for a ContactEndpoint (1:1).
+    Non-secret options live in `config`; API keys live in AWS Secrets Manager (ARN on this row).
+    Unmanaged mirror of CRM communications.ContactEndpointEmailSettings.
+    """
+
+    PROVIDER_MAILGUN = 'mailgun'
+    PROVIDER_RESEND = 'resend'
+    PROVIDER_MAILCHIMP_MARKETING = 'mailchimp_marketing'
+    PROVIDER_MAILCHIMP_TRANSACTIONAL = 'mailchimp_transactional'
+
+    PROVIDER_CHOICES = (
+        (PROVIDER_MAILGUN, 'Mailgun'),
+        (PROVIDER_RESEND, 'Resend'),
+        (PROVIDER_MAILCHIMP_MARKETING, 'Mailchimp Marketing'),
+        (PROVIDER_MAILCHIMP_TRANSACTIONAL, 'Mailchimp Transactional (Mandrill)'),
+    )
+
+    endpoint = models.OneToOneField(
+        ContactEndpoint,
+        on_delete=models.CASCADE,
+        related_name='email_settings',
+        help_text='Contact endpoint this email configuration applies to',
+    )
+    provider = models.CharField(max_length=40, choices=PROVIDER_CHOICES)
+    config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Non-secret provider options (domain, region flags, audience ids, etc.).',
+    )
+    credentials_secret_arn = models.CharField(
+        max_length=512,
+        blank=True,
+        null=True,
+        help_text='AWS Secrets Manager ARN; JSON shape depends on provider (e.g. api_key, webhook_signing_key).',
+    )
+    credentials_secret_region = models.CharField(
+        max_length=32,
+        blank=True,
+        null=True,
+        help_text='AWS region for the secret (optional if derivable from ARN)',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'contact_endpoint_email_settings'
+
+    def __str__(self):
+        return f'{self.get_provider_display()} for {self.endpoint_id}'
+
+
 class ContactEndpointCampaign(models.Model):
     """
     Mapping model to handle many-to-many relationship between ContactEndpoint and Campaign.
@@ -604,3 +659,118 @@ class ContactEndpointSmsSettings(models.Model):
             raise ValidationError({
                 'not_opted_in_default_reply_template': "Template must have channel='sms'"
             })
+
+
+class EmailMessage(models.Model):
+    """
+    Email message log for provider webhooks and outbound correlation.
+    Unmanaged mirror of CRM communications.EmailMessage.
+    """
+
+    DIRECTION_CHOICES = [
+        ('inbound', 'Inbound'),
+        ('outbound', 'Outbound'),
+        ('event', 'Provider event'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('received', 'Received'),
+        ('sent', 'Sent'),
+        ('delivered', 'Delivered'),
+        ('failed', 'Failed'),
+        ('event', 'Event'),
+    ]
+
+    endpoint = models.ForeignKey(
+        ContactEndpoint,
+        on_delete=models.CASCADE,
+        related_name='email_messages',
+        help_text='Email contact endpoint for this message',
+    )
+    provider = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text='Email provider (e.g. mailgun, resend)',
+    )
+    provider_message_id = models.CharField(
+        max_length=512,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text='Provider message id (e.g. Mailgun Message-Id or event message id)',
+    )
+    direction = models.CharField(
+        max_length=10,
+        choices=DIRECTION_CHOICES,
+        default='inbound',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='received',
+    )
+    event_type = models.CharField(
+        max_length=80,
+        blank=True,
+        null=True,
+        help_text='Provider event name for webhook events (e.g. delivered, failed)',
+    )
+    from_email = models.CharField(max_length=512, blank=True, null=True)
+    to_email = models.CharField(max_length=512, blank=True, null=True)
+    subject = models.TextField(blank=True, null=True)
+    body_text = models.TextField(blank=True, null=True)
+    body_html = models.TextField(blank=True, null=True)
+    raw_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Normalized webhook payload subset or full POST dict',
+    )
+    webhook_query_params = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Query parameters from webhook URL',
+    )
+
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='email_messages',
+    )
+    nurturing_campaign = models.ForeignKey(
+        'external_models.LeadNurturingCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='email_messages',
+    )
+    in_reply_to_bulk_campaign_message = models.ForeignKey(
+        'external_models.BulkCampaignMessage',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='email_inbound_replies',
+        help_text='Bulk campaign message this inbound may reply to (future: References header).',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'communications_email_message'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['endpoint', 'created_at']),
+            models.Index(fields=['account', 'created_at']),
+            models.Index(fields=['nurturing_campaign', 'created_at']),
+            models.Index(fields=['provider', 'provider_message_id']),
+            models.Index(fields=['direction', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.direction} {self.from_email} → {self.to_email} ({self.status})"

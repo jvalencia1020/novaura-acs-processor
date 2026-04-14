@@ -50,6 +50,12 @@ from .nurturing_campaign_base import (
 
 from .accounts import User
 from .channel_configs import EmailConfig, SMSConfig, VoiceConfig, ChatConfig
+from .communications import ContactEndpointEmailSettings, EmailMessage
+from .outbound_email_template import (
+    EmailImportSession,
+    OutboundEmailTemplate,
+    OutboundEmailTemplateVersion,
+)
 
 
 __all__ = [
@@ -103,4 +109,13 @@ __all__ = [
     'SMSConfig',
     'VoiceConfig',
     'ChatConfig',
+
+    # Communications (email provider / webhook log mirrors)
+    'ContactEndpointEmailSettings',
+    'EmailMessage',
+
+    # Outbound email templates (ACS)
+    'EmailImportSession',
+    'OutboundEmailTemplate',
+    'OutboundEmailTemplateVersion',
 ]

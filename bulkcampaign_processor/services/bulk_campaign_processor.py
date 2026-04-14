@@ -31,6 +31,7 @@ from django.conf import settings
 import time
 
 from shared_services.message_delivery import MessageDeliveryService
+from shared_services.template_variable_render import build_nested_template_context
 from shared_services.message_validation_service import MessageValidationService
 from shared_services.time_calculation_service import TimeCalculationService
 from shared_services.message_group_service import MessageGroupService
@@ -997,6 +998,24 @@ class BulkCampaignProcessor:
                     logger.debug(f"Cannot send blast message {message.id} - scheduled_for {message.scheduled_for} not reached yet")
                     return False
 
+            # Email: replay-safe skip when a worker retries after Mailgun already accepted the send.
+            email_send_idempotency_key = None
+            if campaign.channel == 'email':
+                message.refresh_from_db()
+                email_send_idempotency_key = (message.metadata or {}).get(
+                    'send_idempotency_key'
+                ) or f'bulk_campaign_message:{message.id}'
+                if message.status == 'sent' and (message.provider_message_id or '').strip():
+                    logger.info(
+                        'bulk_email_idempotent_skip bulk_campaign_message_id=%s '
+                        'nurturing_campaign_id=%s send_idempotency_key=%s provider_message_id=%s',
+                        message.id,
+                        campaign.id,
+                        email_send_idempotency_key,
+                        message.provider_message_id,
+                    )
+                    return True
+
             # Get message content (with optional short link and keyword for drip/reminder/blast)
             extra_context = None
             link, drip_step_id, reminder_message_id, blast_schedule_id, keyword_str = self._resolve_link_for_bulk_message(message, campaign)
@@ -1126,6 +1145,24 @@ class BulkCampaignProcessor:
             else:
                 channel_config = self._get_campaign_channel_config(campaign)
 
+            email_context = None
+            if campaign.channel == 'email':
+                email_context = build_nested_template_context(
+                    lead=participant.lead,
+                    nurturing_campaign=campaign,
+                    sender_user=campaign.created_by,
+                )
+
+            log_context = None
+            if campaign.channel == 'email' and email_send_idempotency_key is not None:
+                log_context = {
+                    'bulk_campaign_message_id': message.id,
+                    'nurturing_campaign_id': campaign.id,
+                    'send_idempotency_key': email_send_idempotency_key,
+                }
+                if channel_config and getattr(channel_config, 'from_endpoint_id', None):
+                    log_context['contact_endpoint_id'] = channel_config.from_endpoint_id
+
             # Send message using the delivery service
             success, thread_message = self.message_delivery.send_message(
                 channel=campaign.channel,
@@ -1135,12 +1172,17 @@ class BulkCampaignProcessor:
                 subject=campaign.subject if hasattr(campaign, 'subject') else None,
                 service_phone=service_phone,
                 message_type=message.message_type,  # Pass message type to delivery service
-                channel_config=channel_config  # Pass channel configuration to delivery service
+                channel_config=channel_config,  # Pass channel configuration to delivery service
+                email_context=email_context,
+                log_context=log_context,
             )
 
             if success:
-                # Update message status
-                message.update_status('sent')
+                # Update message status (persist idempotency key for email bulk sends)
+                if campaign.channel == 'email' and email_send_idempotency_key:
+                    message.update_status('sent', {'send_idempotency_key': email_send_idempotency_key})
+                else:
+                    message.update_status('sent')
 
                 # Persist Twilio SID on BulkCampaignMessage for reply tracking (ParentMessageSid lookup)
                 if campaign.channel == 'sms' and thread_message:
@@ -1148,6 +1190,11 @@ class BulkCampaignProcessor:
                     twilio_sid = getattr(twilio_msg, 'message_sid', None) if twilio_msg else None
                     if twilio_sid:
                         message.provider_message_id = twilio_sid
+                        message.save(update_fields=['provider_message_id'])
+                elif campaign.channel == 'email' and thread_message:
+                    mailgun_mid = getattr(thread_message, 'email_provider_message_id', None)
+                    if mailgun_mid:
+                        message.provider_message_id = mailgun_mid
                         message.save(update_fields=['provider_message_id'])
                 
                 # Update participant progress

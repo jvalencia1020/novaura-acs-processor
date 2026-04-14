@@ -1,9 +1,12 @@
 import logging
+from typing import Any, Dict, Optional
+
 from django.utils import timezone
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 from django.conf import settings
 
+from external_models.models.channel_configs import EmailConfig
 from external_models.models.communications import (
     Conversation,
     Participant,
@@ -11,6 +14,8 @@ from external_models.models.communications import (
     ConversationThread,
     ThreadMessage
 )
+from shared_services.email.email_dispatch import send_from_email_config
+from shared_services.template_variable_render import replace_template_variables
 from ..voice_delivery.voice_delivery_service import VoiceDeliveryService
 
 logger = logging.getLogger(__name__)
@@ -25,10 +30,22 @@ class MessageDeliveryService:
         self.twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         self.voice_delivery = VoiceDeliveryService()
 
-    def send_message(self, channel, content, lead, user, subject=None, service_phone=None, message_type='regular', channel_config=None):
+    def send_message(
+        self,
+        channel,
+        content,
+        lead,
+        user,
+        subject=None,
+        service_phone=None,
+        message_type='regular',
+        channel_config=None,
+        email_context=None,
+        log_context: Optional[Dict[str, Any]] = None,
+    ):
         """
         Send a message through the specified channel.
-        
+
         Args:
             channel (str): The channel to send through ('sms', 'email', 'voice', 'chat')
             content (str): The message content
@@ -38,7 +55,9 @@ class MessageDeliveryService:
             service_phone (str, optional): Service phone number for SMS/Voice
             message_type (str, optional): Type of message ('regular', 'opt_out_notice', 'opt_out_confirmation')
             channel_config: The channel configuration object (EmailConfig, SMSConfig, VoiceConfig, ChatConfig)
-            
+            email_context: Optional dict for Mailgun (replace_template_variables / MessageTemplate context)
+            log_context: Optional dict for Mailgun structured logs (e.g. bulk_campaign_message_id).
+
         Returns:
             tuple: (success, thread_message)
         """
@@ -49,7 +68,16 @@ class MessageDeliveryService:
             if channel == 'sms':
                 return self._send_sms(content, lead, user, service_phone, message_type)
             elif channel == 'email':
-                return self._send_email(content, lead, user, subject, message_type)
+                return self._send_email(
+                    content,
+                    lead,
+                    user,
+                    subject,
+                    message_type,
+                    channel_config,
+                    email_context,
+                    log_context=log_context,
+                )
             elif channel == 'voice':
                 return self._send_voice(content, lead, user, message_type, channel_config)
             elif channel == 'chat':
@@ -125,42 +153,90 @@ class MessageDeliveryService:
             logger.error(f"Error sending SMS message: {str(e)}")
             return False, None
 
-    def _send_email(self, content, lead, user, subject=None, message_type='regular'):
-        """Send an email message"""
+    def _send_email(
+        self,
+        content,
+        lead,
+        user,
+        subject=None,
+        message_type='regular',
+        channel_config=None,
+        email_context=None,
+        log_context: Optional[Dict[str, Any]] = None,
+    ):
+        """Send email via Mailgun using EmailConfig + ContactEndpoint email_settings."""
         try:
-            # Create thread for tracking
+            if not isinstance(channel_config, EmailConfig):
+                logger.error('Email send requires channel_config as EmailConfig')
+                return False, None
+            if not getattr(lead, 'email', None) or not str(lead.email).strip():
+                logger.error('Email send requires lead.email')
+                return False, None
+            if not channel_config.from_endpoint_id:
+                logger.error('EmailConfig.from_endpoint is required for Mailgun send')
+                return False, None
+
+            merged_html = None
+            if channel_config.email_content_mode == EmailConfig.MODE_INLINE and content and str(content).strip():
+                merged_html = str(content).strip()
+
+            dispatch_log_ctx = dict(log_context or {})
+            dispatch_log_ctx.setdefault(
+                'contact_endpoint_id', getattr(channel_config, 'from_endpoint_id', None)
+            )
+
+            result = send_from_email_config(
+                channel_config,
+                to_email=str(lead.email).strip(),
+                context=email_context,
+                subject_override=subject,
+                merged_html_body=merged_html,
+                log_context=dispatch_log_ctx,
+            )
+
             thread = ConversationThread.objects.create(
                 lead=lead,
                 channel='email',
                 status='open',
                 subject=subject,
-                last_message_timestamp=timezone.now()
+                last_message_timestamp=timezone.now(),
             )
+            ctx = email_context or {}
+            if channel_config.email_content_mode == EmailConfig.MODE_OUTBOUND_ACS:
+                ver = channel_config.hosted_template_version
+                body_for_thread = (
+                    replace_template_variables(ver.html_body or '', ctx) if ver else (merged_html or '')
+                )
+            else:
+                body_for_thread = merged_html or (channel_config.content or '') or ''
 
-            # Create thread message
             thread_message = ThreadMessage.objects.create(
                 thread=thread,
                 sender_type='user',
-                content=content,
+                content=body_for_thread or '(no body)',
                 channel='email',
                 lead=lead,
-                user=user
+                user=user,
+                read_status=True,
             )
+            thread_message.email_provider_message_id = result.message_id
 
-            # TODO: Implement actual email sending using your email service
-            # This could be SendGrid, Mailgun, etc.
-            # For now, we'll just mark it as sent
-            thread_message.read_status = True
-            thread_message.save()
-
-            # Log successful opt-out message delivery
             if message_type in ['opt_out_notice', 'opt_out_confirmation']:
                 logger.info(f"Successfully sent {message_type} message to {lead.email} via email")
 
             return True, thread_message
 
         except Exception as e:
-            logger.error(f"Error sending email message: {str(e)}")
+            ctx = log_context or {}
+            logger.error(
+                'email_send_failed error=%s contact_endpoint_id=%s nurturing_campaign_id=%s '
+                'bulk_campaign_message_id=%s send_idempotency_key=%s',
+                e,
+                ctx.get('contact_endpoint_id'),
+                ctx.get('nurturing_campaign_id'),
+                ctx.get('bulk_campaign_message_id'),
+                ctx.get('send_idempotency_key'),
+            )
             return False, None
 
     def _send_voice(self, content, lead, user, message_type='regular', voice_config=None):

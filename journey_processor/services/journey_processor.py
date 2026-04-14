@@ -15,11 +15,13 @@ from external_models.models.communications import (
     Conversation, Participant, ConversationMessage,
     ConversationThread, ThreadMessage
 )
+from external_models.models.channel_configs import EmailConfig
 from external_models.models.external_references import Lead, Step as FunnelStep
 from external_models.models.accounts import User
 from journey_processor.services.condition_evaluator import ConditionEvaluator
 from django.conf import settings
 from shared_services.message_delivery import MessageDeliveryService
+from shared_services.template_variable_render import build_nested_template_context
 
 logger = logging.getLogger(__name__)
 
@@ -378,17 +380,33 @@ class JourneyProcessor:
     def _process_email_step(self, participant, step):
         """Process an email step"""
         template = step.template
-        if not template:
-            logger.error(f"Email step {step.id} has no template")
+        if not step.email_config:
+            logger.error(
+                "Email step %s requires email_config (from_endpoint + Mailgun) for delivery",
+                step.id,
+            )
+            return {'success': False}
+        if not template and step.email_config.email_content_mode == EmailConfig.MODE_INLINE:
+            logger.error(f"Email step {step.id} has no template (required for inline mode)")
             return {'success': False}
 
         try:
+            email_context = build_nested_template_context(
+                lead=participant.lead,
+                sender_user=step.journey.created_by,
+            )
+            if template and step.email_config.email_content_mode == EmailConfig.MODE_INLINE:
+                merged_body = template.replace_variables(email_context)
+            else:
+                merged_body = ''
             success, thread_message = self.message_delivery.send_message(
                 channel='email',
-                content=template.content,
+                content=merged_body,
                 lead=participant.lead,
                 user=step.journey.created_by,
-                subject=template.subject if hasattr(template, 'subject') else None
+                subject=template.subject if hasattr(template, 'subject') else None,
+                channel_config=step.email_config,
+                email_context=email_context,
             )
 
             if success:

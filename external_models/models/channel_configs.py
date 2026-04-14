@@ -4,8 +4,29 @@ from .communications import ContactEndpoint
 from .messages import MessageTemplate
 
 class EmailConfig(models.Model):
+    MODE_INLINE = 'inline'
+    MODE_OUTBOUND_ACS = 'outbound_acs'
+    MODE_HOSTED_MAILGUN = 'hosted_mailgun'
+    EMAIL_CONTENT_MODE_CHOICES = (
+        (MODE_INLINE, 'Inline (content or MessageTemplate)'),
+        (MODE_OUTBOUND_ACS, 'Outbound stored template (ACS merge)'),
+    )
+
+    email_content_mode = models.CharField(
+        max_length=20,
+        choices=EMAIL_CONTENT_MODE_CHOICES,
+        default=MODE_INLINE,
+    )
     content = models.TextField(blank=True, null=True)
     template = models.ForeignKey(MessageTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name='email_configs')
+    hosted_template_version = models.ForeignKey(
+        'external_models.OutboundEmailTemplateVersion',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='email_configs',
+        help_text='Approved OutboundEmailTemplateVersion when email_content_mode is outbound_acs',
+    )
     subject = models.CharField(max_length=255, blank=True, null=True)
     from_endpoint = models.ForeignKey(ContactEndpoint, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     from_name = models.CharField(max_length=255, blank=True, null=True)
@@ -25,7 +46,7 @@ class EmailConfig(models.Model):
             raise ValidationError("Selected endpoint must be an email endpoint")
 
     def get_from_email(self):
-        return self.from_endpoint.value if self.from_endpoint else self.from_email
+        return self.from_endpoint.value if self.from_endpoint else None
 
 class SMSConfig(models.Model):
     content = models.TextField(blank=True, null=True)
