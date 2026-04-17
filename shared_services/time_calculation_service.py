@@ -200,13 +200,37 @@ class TimeCalculationService:
                     next_time = self.calculate_next_campaign_operating_time(current_time, crm_campaign)
                     if next_time:
                         return next_time
-            
-            # Fall back to legacy business hours logic
-            next_time = self.calculate_next_business_time(current_time, schedule)
-            
-            # Then adjust for weekends if needed
-            next_time = self.adjust_for_weekends(next_time, schedule.exclude_weekends)
-            
+
+            next_time = current_time
+            bh_only = getattr(schedule, 'business_hours_only', False)
+            legacy_window = (
+                hasattr(schedule, 'start_time')
+                and hasattr(schedule, 'end_time')
+                and schedule.start_time is not None
+                and schedule.end_time is not None
+            )
+            if bh_only and legacy_window:
+                next_time = self.calculate_next_business_time(current_time, schedule)
+            elif bh_only:
+                schedule_id = getattr(schedule, 'pk', None) or getattr(schedule, 'id', None)
+                campaign_id = None
+                if hasattr(schedule, 'campaign') and schedule.campaign is not None:
+                    campaign_id = getattr(schedule.campaign, 'pk', None) or getattr(
+                        schedule.campaign, 'id', None
+                    )
+                logger.warning(
+                    'business_hours_only is True but schedule has no legacy start_time/end_time '
+                    'window and CRM operating hours did not apply or returned no slot; '
+                    'keeping proposed send time unchanged. Link nurturing campaign to crm_campaign '
+                    'and define operating hours, or disable business_hours_only. '
+                    'schedule_id=%s nurturing_campaign_id=%s',
+                    schedule_id,
+                    campaign_id,
+                )
+
+            next_time = self.adjust_for_weekends(
+                next_time, getattr(schedule, 'exclude_weekends', False)
+            )
             return next_time
 
         except Exception as e:
