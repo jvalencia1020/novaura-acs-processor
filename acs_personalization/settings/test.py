@@ -19,10 +19,14 @@ PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.MD5PasswordHasher',
 ]
 
-# Disable logging during tests
+# Quiet logging during tests (root NullHandler + CRITICAL).
+# disable_existing_loggers=False avoids muting loggers that already existed
+# when this config is applied (import order varies by environment). A logger
+# left disabled breaks unittest.assertLogs on Python 3.12 because assertLogs
+# does not set logger.disabled back to False.
 LOGGING = {
     'version': 1,
-    'disable_existing_loggers': True,
+    'disable_existing_loggers': False,
     'handlers': {
         'null': {
             'class': 'logging.NullHandler',
