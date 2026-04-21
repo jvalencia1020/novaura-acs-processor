@@ -37,13 +37,15 @@ class ApplyEavPlaceholdersTests(SimpleTestCase):
         self.assertEqual(apply_eav_placeholders(text='{{ lead_field.a }}', lead=lead), '{{ lead_field.a }}')
 
     def test_replaces_from_queryset(self):
-        from external_models.models.external_references import Lead
+        from external_models.models.external_references import Campaign, Lead
         from shared_services.eav_email_merge import apply_eav_placeholders
 
-        campaign = MagicMock()
-        campaign.id = 9
-        campaign.account_id = 1
-        campaign.campaign_model_id = 2
+        campaign = Campaign(
+            pk=9,
+            account_id=1,
+            campaign_model_id=2,
+            name='',
+        )
 
         lead = Lead()
         lead.campaign_id = 9
