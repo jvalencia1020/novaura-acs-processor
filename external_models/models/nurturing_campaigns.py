@@ -716,14 +716,32 @@ class BulkCampaignMessage(models.Model):
             sender_user=getattr(campaign, 'created_by', None),
             extra=extra_context,
         )
+        from shared_services.eav_email_merge import apply_eav_placeholders
+
         if self.message_type == 'opt_out_notice':
-            return replace_variables(campaign.initial_opt_out_notice or '', opt_ctx)
+            merged = replace_variables(campaign.initial_opt_out_notice or '', opt_ctx)
+            lead_obj = opt_ctx.get('lead')
+            if isinstance(lead_obj, Lead):
+                return apply_eav_placeholders(text=str(merged), lead=lead_obj)
+            return merged
         if self.message_type == 'opt_out_confirmation':
-            return replace_variables(campaign.opt_out_message or '', opt_ctx)
+            merged = replace_variables(campaign.opt_out_message or '', opt_ctx)
+            lead_obj = opt_ctx.get('lead')
+            if isinstance(lead_obj, Lead):
+                return apply_eav_placeholders(text=str(merged), lead=lead_obj)
+            return merged
         if self.message_type != 'regular':
             return ''
 
         context = opt_ctx
+
+        def _with_eav_merged(s):
+            if s is None:
+                return None
+            lead_obj = context.get('lead')
+            if isinstance(lead_obj, Lead):
+                return apply_eav_placeholders(text=str(s), lead=lead_obj)
+            return s
 
         def _try_outbound_acs_email_body(email_config: EmailConfig):
             if email_config.email_content_mode not in (
@@ -740,14 +758,14 @@ class BulkCampaignMessage(models.Model):
                     campaign.id,
                 )
                 return True, None
-            return True, replace_template_variables(ver.html_body or '', context)
+            return True, _with_eav_merged(replace_template_variables(ver.html_body or '', context))
 
         def _inline_channel_body(channel_config):
             if getattr(channel_config, 'template_id', None):
-                return channel_config.template.replace_variables(context)
+                return _with_eav_merged(channel_config.template.replace_variables(context))
             raw = (getattr(channel_config, 'content', None) or '').strip()
             if raw:
-                return replace_variables(raw, context)
+                return _with_eav_merged(replace_variables(raw, context))
             return None
 
         if campaign.campaign_type == 'drip' and self.drip_message_step:
@@ -808,7 +826,7 @@ class BulkCampaignMessage(models.Model):
 
         raw_campaign = (getattr(campaign, 'content', None) or '').strip()
         if raw_campaign:
-            return replace_variables(raw_campaign, context)
+            return _with_eav_merged(replace_variables(raw_campaign, context))
 
         logger.error('No content found in campaign %s', campaign.id)
         return ''

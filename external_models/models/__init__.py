@@ -23,7 +23,15 @@ from .external_references import (
     Campaign,
     Funnel,
     Step,
-    Lead
+    Lead,
+)
+from .lead_eav import (
+    CampaignLeadFieldMapping,
+    IntakeField,
+    IntakeSection,
+    LeadFieldDefinition,
+    LeadFieldValue,
+    LeadIntakeValue,
 )
 
 from .drip_campaigns import (
@@ -100,6 +108,14 @@ __all__ = [
     'Funnel',
     'Step',
     'Lead',
+
+    # Lead EAV (CRM table mirrors)
+    'LeadFieldDefinition',
+    'LeadFieldValue',
+    'CampaignLeadFieldMapping',
+    'IntakeSection',
+    'IntakeField',
+    'LeadIntakeValue',
 
     # Accounts
     'User',

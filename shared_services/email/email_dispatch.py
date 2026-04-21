@@ -12,6 +12,10 @@ from django.core.exceptions import ObjectDoesNotExist
 from shared_services.email.base import EmailSendResult
 from shared_services.email.registry import get_email_provider_adapter
 from shared_services.email.secrets_loader import get_secret_json
+from shared_services.eav_email_merge import (
+    apply_eav_placeholders,
+    apply_eav_placeholders_to_email_parts,
+)
 from shared_services.template_variable_render import replace_template_variables
 
 if TYPE_CHECKING:
@@ -19,6 +23,14 @@ if TYPE_CHECKING:
     from external_models.models.communications import ContactEndpoint
 
 logger = logging.getLogger(__name__)
+
+
+def _lead_for_eav(context: Optional[Dict[str, Any]]):
+    """Return ORM Lead from merge context when suitable for EAV substitution."""
+    from external_models.models.external_references import Lead as LeadModel
+
+    lead_obj = (context or {}).get('lead')
+    return lead_obj if isinstance(lead_obj, LeadModel) else None
 
 
 def load_credentials_for_email_settings(email_settings) -> Dict[str, Any]:
@@ -135,10 +147,13 @@ def send_from_email_config(
     if not subject:
         raise ValueError('subject is required')
 
-    if email_config.email_content_mode == EmailConfig.MODE_OUTBOUND_ACS:
+    outbound_modes = (EmailConfig.MODE_OUTBOUND_ACS, EmailConfig.MODE_HOSTED_MAILGUN)
+    if email_config.email_content_mode in outbound_modes:
         ver = email_config.hosted_template_version
         if not ver:
-            raise ValueError('hosted_template_version is required for outbound_acs mode')
+            raise ValueError(
+                'hosted_template_version is required for outbound_acs / hosted_mailgun mode'
+            )
         if ver.status != 'approved':
             raise ValueError('hosted_template_version must be approved before send')
         merge_ctx = context if context is not None else {}
@@ -146,6 +161,13 @@ def send_from_email_config(
         html_body = replace_template_variables(ver.html_body or '', merge_ctx)
         tb = (ver.text_body or '').strip()
         text_body = replace_template_variables(tb, merge_ctx) if tb else None
+        lead_for_eav = _lead_for_eav(merge_ctx)
+        subject_rendered, html_body, text_body = apply_eav_placeholders_to_email_parts(
+            subject=subject_rendered,
+            html_body=html_body,
+            text_body=text_body,
+            lead=lead_for_eav,
+        )
 
         return send_from_contact_endpoint(
             endpoint,
@@ -160,8 +182,17 @@ def send_from_email_config(
         )
 
     # inline
+    merge_ctx_inline = context if context is not None else {}
+    lead_for_eav_inline = _lead_for_eav(merge_ctx_inline)
+
     if merged_html_body is not None and merged_html_body.strip():
         html_body = merged_html_body.strip()
+        subject, html_body, _ = apply_eav_placeholders_to_email_parts(
+            subject=subject,
+            html_body=html_body,
+            text_body=None,
+            lead=lead_for_eav_inline,
+        )
         return send_from_contact_endpoint(
             endpoint,
             to_email=to_email,
@@ -177,6 +208,13 @@ def send_from_email_config(
     html_body, text_body = render_inline_email_body(email_config, context)
     if not html_body:
         raise ValueError('inline mode requires template or non-empty content')
+
+    subject, html_body, text_body = apply_eav_placeholders_to_email_parts(
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body,
+        lead=lead_for_eav_inline,
+    )
 
     return send_from_contact_endpoint(
         endpoint,

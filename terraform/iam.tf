@@ -69,6 +69,15 @@ resource "aws_iam_role_policy" "ecs_execution_role_logs_policy" {
 # Account ID for resource ARNs (e.g. DynamoDB link-runtime table in same account)
 data "aws_caller_identity" "current" {}
 
+# CRM-managed Mailgun (etc.) credentials are stored per account under
+# {segment}/crm/account-*/email-credentials/* — not the fixed processor secret ARNs.
+locals {
+  contact_endpoint_email_secret_arn_wildcards = [
+    for segment in ["prod", "staging", "development", "production"] :
+    "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${segment}/crm/*"
+  ]
+}
+
 resource "aws_iam_role" "ecs_task_role" {
   name = "novaura-acs-ecs-task-role"
 
@@ -119,11 +128,14 @@ resource "aws_iam_role_policy" "ecs_task_role_policy" {
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = [
-          var.db_password_arn,
-          var.django_secret_key_arn,
-          var.bland_ai_api_key_arn
-        ]
+        Resource = concat(
+          [
+            var.db_password_arn,
+            var.django_secret_key_arn,
+            var.bland_ai_api_key_arn
+          ],
+          local.contact_endpoint_email_secret_arn_wildcards
+        )
       },
       {
         Effect = "Allow"

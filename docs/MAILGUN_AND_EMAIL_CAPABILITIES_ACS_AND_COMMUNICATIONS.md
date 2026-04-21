@@ -155,6 +155,15 @@ Stable log prefixes and fields:
 - **Replay guard:** Before send, if **`status == 'sent'`** and **`provider_message_id`** is set, the processor logs **`bulk_email_idempotent_skip`** and returns success without calling Mailgun again (covers aggressive worker retries after Mailgun already accepted the send).
 - **Concurrent double-fire:** not fully serialized without a short-lived **`sending`** state or outbox row plus DB migration on **`bulk_campaign_message`** (`managed = False`); coordinate with ops if strict single-flight is required.
 
+### 6.4 EAV merge (lead_field / intake tokens)
+
+After ACS / template merge, **`shared_services/eav_email_merge.py`** substitutes **`{{ lead_field.<api_name> }}`** and **`{{ intake.<api_name> }}`** when `context['lead']` is an ORM **`Lead`** with a campaign.
+
+- **Send:** [`shared_services/email/email_dispatch.py`](shared_services/email/email_dispatch.py) — **`send_from_email_config`** runs **`apply_eav_placeholders_to_email_parts`** for **`outbound_acs`**, **`hosted_mailgun`**, and **inline** paths (including **`merged_html_body`**).
+- **Bulk body preview:** [`external_models/models/nurturing_campaigns.py`](external_models/models/nurturing_campaigns.py) — **`BulkCampaignMessage.get_message_content`** wraps merged strings with the same EAV helper so preview matches send.
+- **ORM mirrors:** [`external_models/models/lead_eav.py`](external_models/models/lead_eav.py) — unmanaged models aligned with Nova CRM: `lead_field_definition`, `lead_field_value`, `campaign_lead_field_mapping`, `intake_section`, `intake_field`, `lead_intake_value`.
+- Do **not** model pure EAV fields as ACS **`TemplateVariable`** rows (avoids conflicting resolution order).
+
 ---
 
 ## 7. Configuration checklist
@@ -205,9 +214,12 @@ Bulk and journey email sends use **`shared_services/email/`** (Mailgun `messages
 | Path | Role |
 |------|------|
 | `shared_services/email/mailgun.py` | Retries, `send_mailgun_message`, structured Mailgun logs |
-| `shared_services/email/email_dispatch.py` | `send_from_email_config`, `send_from_contact_endpoint`, `log_context` |
+| `shared_services/email/email_dispatch.py` | `send_from_email_config`, `send_from_contact_endpoint`, `log_context`, EAV after ACS |
+| `shared_services/eav_email_merge.py` | `extract_eav_placeholders`, `apply_eav_placeholders`, `apply_eav_placeholders_to_email_parts` |
+| `external_models/models/lead_eav.py` | Unmanaged CRM EAV table mirrors |
 | `shared_services/message_delivery/message_delivery_service.py` | `send_message` / `_send_email`, `log_context` |
 | `bulkcampaign_processor/services/bulk_campaign_processor.py` | Bulk idempotency + `log_context` wiring |
+| `external_models/models/nurturing_campaigns.py` | `BulkCampaignMessage.get_message_content` EAV wrapper |
 
 ---
 
