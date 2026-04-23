@@ -7,9 +7,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 
 from shared_services.email.base import EmailSendResult
+from shared_services.email.mailgun import list_unsubscribe_extra_headers
 from shared_services.email.registry import get_email_provider_adapter
 from shared_services.email.secrets_loader import get_secret_json
 from shared_services.eav_email_merge import (
@@ -81,6 +83,21 @@ def send_from_contact_endpoint(
     if not from_addr:
         raise ValueError('from_email is required (endpoint.value or explicit from_email)')
 
+    cfg = email_settings.config or {}
+    mailto = (cfg.get('list_unsubscribe_mailto') or '').strip()
+    if not mailto:
+        mailto = (getattr(settings, 'LIST_UNSUBSCRIBE_MAILTO', None) or '').strip()
+    https = (cfg.get('list_unsubscribe_https') or '').strip()
+    if not https:
+        https = (getattr(settings, 'LIST_UNSUBSCRIBE_HTTPS', None) or '').strip()
+    raw_one_click = cfg.get('list_unsubscribe_one_click', None)
+    one_click = raw_one_click if isinstance(raw_one_click, bool) else None
+    extra_headers = list_unsubscribe_extra_headers(
+        mailto or None,
+        https or None,
+        one_click,
+    ) or None
+
     return adapter.send(
         credentials=credentials,
         config=email_settings.config or {},
@@ -92,6 +109,7 @@ def send_from_contact_endpoint(
         reply_to=reply_to,
         tags=tags,
         log_context=log_context,
+        extra_headers=extra_headers,
     )
 
 

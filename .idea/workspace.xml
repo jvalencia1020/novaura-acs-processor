@@ -6,11 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/MAILGUN_AND_EMAIL_CAPABILITIES_ACS_AND_COMMUNICATIONS.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/MAILGUN_AND_EMAIL_CAPABILITIES_ACS_AND_COMMUNICATIONS.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared_services/email/email_dispatch.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/email/email_dispatch.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/terraform/iam.tf" beforeDir="false" afterPath="$PROJECT_DIR$/terraform/iam.tf" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

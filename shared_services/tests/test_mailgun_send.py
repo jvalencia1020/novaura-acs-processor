@@ -44,6 +44,84 @@ class MailgunMessageSendTests(SimpleTestCase):
         self.assertEqual(data['subject'], 'Hi')
         self.assertEqual(data['html'], '<p>Hello</p>')
         self.assertEqual(data['h:Reply-To'], 'support@example.com')
+        self.assertEqual(data['text'], 'Hello')
+        self.assertNotIn('<', data['text'])
+
+    def test_send_mailgun_message_plain_text_when_explicit_empty_string(self):
+        from shared_services.email.mailgun import send_mailgun_message
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {}
+        mock_resp.json.return_value = {'id': '<x@mailgun>', 'message': 'Queued'}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch('requests.post', return_value=mock_resp) as post:
+            send_mailgun_message(
+                api_key='key-xxx',
+                domain='mg.example.com',
+                api_base='https://api.mailgun.net/v3',
+                to_email='to@example.com',
+                subject='Hi',
+                html_body='<div><p>Line1</p><p>Line2</p></div>',
+                text_body='',
+                from_email='from@mg.example.com',
+            )
+        data = dict(post.call_args.kwargs['data'])
+        self.assertEqual(data['text'], 'Line1\nLine2')
+
+    def test_send_mailgun_message_list_unsubscribe_extra_headers(self):
+        from shared_services.email.mailgun import send_mailgun_message
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {}
+        mock_resp.json.return_value = {'id': '<x@mailgun>', 'message': 'Queued'}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch('requests.post', return_value=mock_resp) as post:
+            send_mailgun_message(
+                api_key='key-xxx',
+                domain='mg.example.com',
+                api_base='https://api.mailgun.net/v3',
+                to_email='to@example.com',
+                subject='Hi',
+                html_body='<p>x</p>',
+                text_body=None,
+                from_email='from@mg.example.com',
+                extra_headers={
+                    'List-Unsubscribe': '<mailto:u@example.com>, <https://example.com/unsub>',
+                    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+                },
+            )
+        data = dict(post.call_args.kwargs['data'])
+        self.assertEqual(
+            data['h:List-Unsubscribe'],
+            '<mailto:u@example.com>, <https://example.com/unsub>',
+        )
+        self.assertEqual(data['h:List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click')
+
+    def test_list_unsubscribe_extra_headers_builder(self):
+        from shared_services.email.mailgun import list_unsubscribe_extra_headers
+
+        self.assertEqual(list_unsubscribe_extra_headers(None, None), {})
+        h = list_unsubscribe_extra_headers('list@example.com', 'https://example.com/u', None)
+        self.assertEqual(
+            h['List-Unsubscribe'],
+            '<mailto:list@example.com>, <https://example.com/u>',
+        )
+        self.assertEqual(h['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click')
+        self.assertNotIn(
+            'List-Unsubscribe-Post',
+            list_unsubscribe_extra_headers('list@example.com', None, None),
+        )
+        no_post = list_unsubscribe_extra_headers(
+            'list@example.com',
+            'https://example.com/u',
+            False,
+        )
+        self.assertIn('List-Unsubscribe', no_post)
+        self.assertNotIn('List-Unsubscribe-Post', no_post)
 
     def test_send_mailgun_message_retries_on_503_then_succeeds(self):
         from shared_services.email.mailgun import send_mailgun_message

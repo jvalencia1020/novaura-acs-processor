@@ -27,15 +27,20 @@ This document summarizes how **Mailgun** is integrated for outbound email, optio
 - **`config` (JSON, non-secret):** For Mailgun, validated keys include:
   - **`domain`** — sending domain (also overridable via secret `domain`).
   - **`eu_region`** (boolean) — selects EU vs US Mailgun API base (`api.eu.mailgun.net` vs `api.mailgun.net`).
+  - **`list_unsubscribe_mailto`** (optional) — mailto target or full `mailto:…` URI for `List-Unsubscribe`.
+  - **`list_unsubscribe_https`** (optional) — HTTPS unsubscribe URL for `List-Unsubscribe` (and RFC 8058 one-click when enabled).
+  - **`list_unsubscribe_one_click`** (optional boolean) — when `true` and an HTTPS list-unsubscribe URI is present, adds `List-Unsubscribe-Post: List-Unsubscribe=One-Click`. When omitted, one-click defaults to **on** if an HTTPS URL is configured (and is **on** when both mailto and HTTPS are set). Set **`false`** to omit the Post header.
+  - If these keys are absent, optional Django settings **`LIST_UNSUBSCRIBE_MAILTO`** / **`LIST_UNSUBSCRIBE_HTTPS`** (environment-driven) supply the same values for ECS or ops defaults without CRM UI. **URLs and mailboxes must be live endpoints** that honor unsubscribe; tokenized per-recipient URLs require matching server-side behavior (Mailgun `%recipient%` placeholders only help if your HTTPS handler implements them).
 - **`credentials_secret_arn` / `credentials_secret_region`:** AWS Secrets Manager JSON typically includes:
   - **`api_key`** (or legacy **`MAILGUN_API_KEY`**)
   - Optional **`webhook_signing_key`** / **`MAILGUN_WEBHOOK_SIGNING_KEY`** for webhook verification
 
 Public helper: **`load_credentials_for_email_settings`** (used by webhooks and dispatch).
 
-### 2.2 `MailgunEmailAdapter` (`communications/email_providers/mailgun.py`)
+### 2.2 `MailgunEmailAdapter` (`shared_services/email/mailgun.py`)
 
-- **`send`** — `POST /v3/{domain}/messages` with `from`, `to`, `subject`, `html`, `text`, optional `h:Reply-To`, up to **3** `o:tag` entries (128 chars each).
+- **`send`** — `POST /v3/{domain}/messages` with `from`, `to`, `subject`, `html`, `text`, optional `h:Reply-To`, optional list-unsubscribe `h:` headers from endpoint `config` (see above), up to **3** `o:tag` entries (128 chars each).
+- **Plain `text` part:** When no non-empty plain body is supplied (`text_body` is `None` or explicit `""`), the **`text`** field is generated from the final HTML with tag stripping (BeautifulSoup) so the MIME alternative matches the HTML semantically (avoids **MPART_ALT_DIFF**-style issues from sending HTML in `text/plain`). Non-empty `text_body` is sent unchanged.
 - **`send_template`** — same endpoint with Mailgun **`template`** + **`t:variables`** (JSON), optional **`t:version`**, optional open/click tracking flags, optional `t:text` generation from template.
 - **Domain templates (HTTP APIs used by ACS sync):**
   - Create template / first version
@@ -43,7 +48,7 @@ Public helper: **`load_credentials_for_email_settings`** (used by webhooks and d
 - **`verify_webhook_request`** — HMAC verification for **form-encoded** inbound posts and **JSON** event payloads (`event-data.token|timestamp|signature`), with timestamp skew guard.
 - **`parse_webhook_request`** — Normalizes inbound MIME (form) or event webhooks into `NormalizedEmailWebhookPayload`.
 
-### 2.3 Dispatch services (`communications/services/email_dispatch.py`)
+### 2.3 Dispatch services (`shared_services/email/email_dispatch.py`)
 
 | Function | Purpose |
 |----------|---------|
@@ -109,7 +114,7 @@ Supporting services: **`acs/services/outbound_email_variables.py`** (map context
 - Returns **501** with `Mailgun not configured` if env credentials are missing.
 - Writes **`LeadActivity`** with provider metadata when successful.
 
-Environment variables (see **`.env.example`**): **`MAILGUN_API_KEY`**, **`MAILGUN_DOMAIN`**, **`MAILGUN_FROM_EMAIL`**, optional **`MAILGUN_EU_REGION`**.
+Environment variables (see **`.env.example`** when present in a deployment repo): **`MAILGUN_API_KEY`**, **`MAILGUN_DOMAIN`**, **`MAILGUN_FROM_EMAIL`**, optional **`MAILGUN_EU_REGION`**. Optional defaults for list-unsubscribe when not set on the endpoint: **`LIST_UNSUBSCRIBE_MAILTO`**, **`LIST_UNSUBSCRIBE_HTTPS`**.
 
 ---
 

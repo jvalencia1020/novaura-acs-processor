@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,6 +20,74 @@ MAILGUN_POST_MAX_BACKOFF_SEC = 8.0
 
 MAILGUN_US_API = 'https://api.mailgun.net/v3'
 MAILGUN_EU_API = 'https://api.eu.mailgun.net/v3'
+
+_BLANK_LINES_RE = re.compile(r'\n{3,}')
+
+
+def html_to_plain_text(html: str) -> str:
+    """Strip tags from HTML for a semantic text/plain alternative (MPART_ALT_DIFF)."""
+    if not html or not str(html).strip():
+        return ''
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError as e:
+        raise ImportError('beautifulsoup4 is required for HTML-to-plain conversion') from e
+    text = BeautifulSoup(html, 'html.parser').get_text('\n', strip=True)
+    text = _BLANK_LINES_RE.sub('\n\n', text).strip()
+    return text
+
+
+def _normalize_list_unsubscribe_mailto_uri(raw: str) -> Optional[str]:
+    s = raw.strip().strip('<>')
+    if not s:
+        return None
+    if s.lower().startswith('mailto:'):
+        return s
+    return f'mailto:{s}'
+
+
+def _normalize_list_unsubscribe_https_uri(raw: str) -> Optional[str]:
+    s = raw.strip().strip('<>')
+    if not s:
+        return None
+    if not s.lower().startswith('https://'):
+        return None
+    return s
+
+
+def list_unsubscribe_extra_headers(
+    mailto: Optional[str],
+    https: Optional[str],
+    one_click: Optional[bool] = None,
+) -> Dict[str, str]:
+    """
+    Build List-Unsubscribe / List-Unsubscribe-Post for Mailgun h: headers.
+
+    When one_click is None: default True if both mailto and https are set, else True if only https
+    (RFC 8058 one-click); False if only mailto.
+    """
+    mailto_uri = _normalize_list_unsubscribe_mailto_uri(mailto) if mailto else None
+    https_uri = _normalize_list_unsubscribe_https_uri(https) if https else None
+    parts: List[str] = []
+    if mailto_uri:
+        parts.append(f'<{mailto_uri}>')
+    if https_uri:
+        parts.append(f'<{https_uri}>')
+    if not parts:
+        return {}
+
+    if one_click is False:
+        effective_one_click = False
+    elif one_click is True:
+        effective_one_click = bool(https_uri)
+    else:
+        # Omitted in config: enable one-click when an HTTPS URI is present; mailto-only skips Post.
+        effective_one_click = bool(https_uri)
+
+    out: Dict[str, str] = {'List-Unsubscribe': ', '.join(parts)}
+    if effective_one_click and https_uri:
+        out['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
+    return out
 
 
 def mailgun_api_base(config: Dict[str, Any]) -> str:
@@ -130,6 +199,7 @@ def send_mailgun_message(
     reply_to: Optional[str] = None,
     tags: Optional[List[str]] = None,
     log_context: Optional[Dict[str, Any]] = None,
+    extra_headers: Optional[Dict[str, str]] = None,
 ) -> EmailSendResult:
     try:
         from requests import HTTPError
@@ -137,11 +207,13 @@ def send_mailgun_message(
         raise ImportError('requests is required for Mailgun') from e
 
     url = f'{api_base.rstrip("/")}/{domain}/messages'
-    text = (
-        text_body
-        if text_body is not None
-        else (html_body[:1000] if len(html_body) > 1000 else html_body)
-    )
+    if text_body is not None and text_body.strip():
+        text = text_body
+    elif html_body.strip():
+        text = html_to_plain_text(html_body)
+    else:
+        text = '' if text_body is not None else ''
+
     form_pairs = [
         ('from', from_email),
         ('to', to_email),
@@ -151,6 +223,10 @@ def send_mailgun_message(
     ]
     if reply_to:
         form_pairs.append(('h:Reply-To', reply_to))
+    if extra_headers:
+        for hk, hv in extra_headers.items():
+            if hk and hv:
+                form_pairs.append((f'h:{hk}', hv))
     if tags:
         for tag in tags[:3]:
             if tag:
@@ -229,6 +305,7 @@ class MailgunEmailAdapter(EmailProviderAdapter):
         reply_to: Optional[str] = None,
         tags: Optional[List[str]] = None,
         log_context: Optional[Dict[str, Any]] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> EmailSendResult:
         api_key = credentials.get('api_key') or credentials.get('MAILGUN_API_KEY')
         if not api_key:
@@ -247,4 +324,5 @@ class MailgunEmailAdapter(EmailProviderAdapter):
             reply_to=reply_to,
             tags=tags,
             log_context=log_context,
+            extra_headers=extra_headers,
         )

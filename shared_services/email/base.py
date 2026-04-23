@@ -31,5 +31,6 @@ class EmailProviderAdapter(abc.ABC):
         reply_to: Optional[str],
         tags: Optional[List[str]] = None,
         log_context: Optional[Dict[str, Any]] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> EmailSendResult:
         raise NotImplementedError

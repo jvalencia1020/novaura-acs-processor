@@ -159,6 +159,10 @@ JOURNEY_PROCESSOR_LOG_LEVEL = os.getenv('JOURNEY_PROCESSOR_LOG_LEVEL', 'INFO')
 SMS_QUEUE_URL = os.getenv('SMS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-sms-events')
 EMAIL_QUEUE_URL = os.getenv('EMAIL_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-email-events')
 
+# Optional defaults for List-Unsubscribe (used when not set on ContactEndpointEmailSettings.config).
+LIST_UNSUBSCRIBE_MAILTO = os.getenv('LIST_UNSUBSCRIBE_MAILTO', '') or None
+LIST_UNSUBSCRIBE_HTTPS = os.getenv('LIST_UNSUBSCRIBE_HTTPS', '') or None
+
 # SMS Marketing Queue Configuration
 SMS_MARKETING_QUEUE_URL = os.getenv('SMS_MARKETING_QUEUE_URL')
 SMS_MARKETING_DLQ_URL = os.getenv('SMS_MARKETING_DLQ_URL')  # Optional
