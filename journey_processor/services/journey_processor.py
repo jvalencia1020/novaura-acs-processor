@@ -86,7 +86,9 @@ class JourneyProcessor:
             'current_journey_step',
             'nurturing_campaign',
             'nurturing_campaign__journey',
-            'lead'
+            'lead',
+            'originating_subscription',
+            'originating_subscription__media_campaign',
         )
 
         logger.debug(f"Found {active_participants.count()} active participants")
@@ -138,10 +140,15 @@ class JourneyProcessor:
 
         if participant_id:
             try:
-                participants = [LeadNurturingParticipant.objects.get(
-                    id=participant_id,
-                    status='active'
-                )]
+                participants = [
+                    LeadNurturingParticipant.objects.select_related(
+                        'originating_subscription',
+                        'originating_subscription__media_campaign',
+                    ).get(
+                        id=participant_id,
+                        status='active',
+                    )
+                ]
             except LeadNurturingParticipant.DoesNotExist:
                 logger.warning(f"Participant {participant_id} not found")
                 return 0
@@ -155,7 +162,9 @@ class JourneyProcessor:
                     'current_journey_step',
                     'nurturing_campaign',
                     'nurturing_campaign__journey',
-                    'lead'
+                    'lead',
+                    'originating_subscription',
+                    'originating_subscription__media_campaign',
                 )
             except Exception as e:
                 logger.warning(f"Error finding participants for lead {lead_id}: {e}")

@@ -5,12 +5,47 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/catalog/models/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/catalog/models/platforms.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/planning/models/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/planning/models/campaigns.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/targeting/mixins.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/base.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/ENHANCED_SQS_GUIDE.md" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/ENHANCED_SQS_GUIDE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/services/sms_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/sms_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/tests/test_sms_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/tests/test_sms_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/communication_processor/utils/message_builder.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/utils/message_builder.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/external_references.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/external_references.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/link_tracking/models/campaign.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/models/campaign.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/link_tracking/models/campaign_mapping.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/models/campaign_mapping.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/link_tracking/models/link.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/models/link.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/link_tracking/services/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/services/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/link_tracking/services/runtime_publisher.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/services/runtime_publisher.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/campaign_matching_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/campaign_matching_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/models/campaign.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/campaign.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/models/event.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/event.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/models/message.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/message.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/models/subscriber_campaign_subscription.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/subscriber_campaign_subscription.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/actions.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/actions.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/message_sender.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/message_sender.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/state.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/state.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -27,33 +62,34 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Python.process_bulk_campaigns.executor&quot;: &quot;Run&quot;,
-    &quot;Python.process_due_messages.executor&quot;: &quot;Run&quot;,
-    &quot;Python.reprocess_sms_messages.executor&quot;: &quot;Run&quot;,
-    &quot;Python.run_bulk_campaign_processor.executor&quot;: &quot;Run&quot;,
-    &quot;Python.sms_marketing_messages.executor&quot;: &quot;Run&quot;,
-    &quot;Python.worker.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/link_tracking&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Python.process_bulk_campaigns.executor": "Run",
+    "Python.process_due_messages.executor": "Run",
+    "Python.reprocess_sms_messages.executor": "Run",
+    "Python.run_bulk_campaign_processor.executor": "Run",
+    "Python.sms_marketing_messages.executor": "Run",
+    "Python.worker.executor": "Run",
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "ai.playground.ignore.import.keys.banner.in.settings": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/catalog/models",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/catalog/models" />
+      <recent name="$PROJECT_DIR$/targeting" />
+      <recent name="$PROJECT_DIR$/planning" />
       <recent name="$PROJECT_DIR$/link_tracking" />
       <recent name="$PROJECT_DIR$/marketing_tracking/models" />
-      <recent name="$PROJECT_DIR$/marketing_tracking" />
-      <recent name="$PROJECT_DIR$/sms_marketing" />
     </key>
   </component>
   <component name="RunManager" selected="Python.process_due_messages">
@@ -311,7 +347,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>453</line>
+          <line>456</line>
           <option name="timeStamp" value="45" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -331,7 +367,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>927</line>
+          <line>930</line>
           <option name="timeStamp" value="49" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -371,7 +407,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>935</line>
+          <line>938</line>
           <option name="timeStamp" value="82" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -386,42 +422,42 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>949</line>
+          <line>952</line>
           <option name="timeStamp" value="89" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/sms_marketing/services/processor.py</url>
-          <line>431</line>
+          <line>485</line>
           <option name="timeStamp" value="97" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/sms_marketing/services/processor.py</url>
-          <line>120</line>
+          <line>134</line>
           <option name="timeStamp" value="99" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/sms_marketing/services/actions.py</url>
-          <line>716</line>
+          <line>804</line>
           <option name="timeStamp" value="106" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/link_tracking/services/runtime_publisher.py</url>
-          <line>147</line>
+          <line>151</line>
           <option name="timeStamp" value="109" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/link_tracking/services/runtime_publisher.py</url>
-          <line>218</line>
+          <line>222</line>
           <option name="timeStamp" value="112" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/link_tracking/services/runtime_publisher.py</url>
-          <line>214</line>
+          <line>218</line>
           <option name="timeStamp" value="113" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>314</line>
+          <line>316</line>
           <option name="timeStamp" value="122" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -451,17 +487,17 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>273</line>
+          <line>275</line>
           <option name="timeStamp" value="129" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>308</line>
+          <line>310</line>
           <option name="timeStamp" value="130" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>994</line>
+          <line>997</line>
           <option name="timeStamp" value="131" />
         </line-breakpoint>
       </breakpoints>

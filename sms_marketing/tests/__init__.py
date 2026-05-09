@@ -1,0 +1,1 @@
+# SMS marketing tests package

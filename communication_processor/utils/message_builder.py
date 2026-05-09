@@ -20,7 +20,9 @@ class SQSMessageBuilder:
         metadata: Optional[Dict[str, Any]] = None,
         processing_hints: Optional[Dict[str, Any]] = None,
         agent_mode: bool = False,
-        agent_config: Optional[Dict[str, Any]] = None
+        agent_config: Optional[Dict[str, Any]] = None,
+        crm_campaign=None,
+        media_campaign=None,
     ) -> Dict[str, Any]:
         """
         Build an enhanced SMS message for SQS.
@@ -83,6 +85,11 @@ class SQSMessageBuilder:
             # Add campaign participant if provided
             if campaign_participant:
                 message['campaign_participant_id'] = campaign_participant.id
+
+        if crm_campaign is not None:
+            message['crm_campaign_id'] = getattr(crm_campaign, 'id', crm_campaign)
+        if media_campaign is not None:
+            message['media_campaign_id'] = getattr(media_campaign, 'id', media_campaign)
         
         # Add message context
         if message_context:
@@ -159,13 +166,88 @@ class SQSMessageBuilder:
                 }
         
         return message
+
+    @staticmethod
+    def build_agent_message(
+        twilio_data: Dict[str, Any],
+        lead: Optional[Lead] = None,
+        nurturing_campaign: Optional[LeadNurturingCampaign] = None,
+        campaign_participant: Optional[LeadNurturingParticipant] = None,
+        agent_prompt: Optional[str] = None,
+        agent_context: Optional[Dict[str, Any]] = None,
+        conversation_history: Optional[list] = None,
+        crm_campaign=None,
+        media_campaign=None,
+    ) -> Dict[str, Any]:
+        """
+        Build an SMS message specifically for AI agent processing.
+        """
+        message = SQSMessageBuilder.build_sms_message(
+            twilio_data,
+            lead,
+            nurturing_campaign,
+            campaign_participant,
+            crm_campaign=crm_campaign,
+            media_campaign=media_campaign,
+        )
+
+        message['agent_mode'] = True
+
+        custom_prompt = agent_prompt or (
+            f"You are a helpful AI assistant for {nurturing_campaign.name if nurturing_campaign else 'our company'}. "
+            "Respond naturally and helpfully to customer inquiries."
+        )
+
+        message['agent_config'] = {
+            'enabled': True,
+            'model': 'gpt-4',
+            'temperature': 0.7,
+            'max_tokens': 150,
+            'prompt': custom_prompt,
+            'context': {
+                'campaign_name': nurturing_campaign.name if nurturing_campaign else 'General',
+                'campaign_type': nurturing_campaign.campaign_type if nurturing_campaign else 'general',
+                'step_number': message.get('message_context', {}).get('step_number', 1),
+                'conversation_history': conversation_history or [],
+                'campaign_goals': [
+                    'Provide helpful information',
+                    'Answer customer questions',
+                    'Guide customers through the process',
+                    'Maintain engagement',
+                ],
+                'response_style': 'friendly and professional',
+                'include_opt_out_info': True,
+                'max_conversation_length': 10,
+                'auto_escalate_to_human': True,
+                'escalation_triggers': [
+                    'customer_requests_human',
+                    'complex_technical_question',
+                    'complaint_or_negative_feedback',
+                    'purchase_intent',
+                ],
+            },
+            'fallback_response': (
+                "Thanks for your message! I'm here to help. Please let me know if you have any questions."
+            ),
+            'escalation_message': (
+                "I'm connecting you with a human representative who will be with you shortly. "
+                "Thank you for your patience!"
+            ),
+        }
+
+        if agent_context:
+            message['agent_config']['context'].update(agent_context)
+
+        return message
     
     @staticmethod
     def build_delivery_status_message(
         twilio_data: Dict[str, Any],
         lead: Optional[Lead] = None,
         nurturing_campaign: Optional[LeadNurturingCampaign] = None,
-        campaign_participant: Optional[LeadNurturingParticipant] = None
+        campaign_participant: Optional[LeadNurturingParticipant] = None,
+        crm_campaign=None,
+        media_campaign=None,
     ) -> Dict[str, Any]:
         """
         Build a delivery status message for SQS.
@@ -180,7 +262,12 @@ class SQSMessageBuilder:
             Enhanced SQS message dictionary
         """
         message = SQSMessageBuilder.build_sms_message(
-            twilio_data, lead, nurturing_campaign, campaign_participant
+            twilio_data,
+            lead,
+            nurturing_campaign,
+            campaign_participant,
+            crm_campaign=crm_campaign,
+            media_campaign=media_campaign,
         )
         
         # Override event type for delivery status
@@ -203,7 +290,9 @@ class SQSMessageBuilder:
         lead: Optional[Lead] = None,
         nurturing_campaign: Optional[LeadNurturingCampaign] = None,
         campaign_participant: Optional[LeadNurturingParticipant] = None,
-        keyword: str = 'STOP'
+        keyword: str = 'STOP',
+        crm_campaign=None,
+        media_campaign=None,
     ) -> Dict[str, Any]:
         """
         Build an opt-out message for SQS.
@@ -231,7 +320,12 @@ class SQSMessageBuilder:
         }
         
         message = SQSMessageBuilder.build_sms_message(
-            twilio_data, lead, nurturing_campaign, campaign_participant
+            twilio_data,
+            lead,
+            nurturing_campaign,
+            campaign_participant,
+            crm_campaign=crm_campaign,
+            media_campaign=media_campaign,
         )
         
         # Override event type for opt-out
@@ -285,7 +379,9 @@ class SQSMessageBuilder:
 def build_inbound_sms_message(
     twilio_data: Dict[str, Any],
     lead: Optional[Lead] = None,
-    nurturing_campaign: Optional[LeadNurturingCampaign] = None
+    nurturing_campaign: Optional[LeadNurturingCampaign] = None,
+    crm_campaign=None,
+    media_campaign=None,
 ) -> Dict[str, Any]:
     """
     Build an inbound SMS message with lead and campaign context.
@@ -307,7 +403,12 @@ def build_inbound_sms_message(
         ).first()
     
     return SQSMessageBuilder.build_sms_message(
-        twilio_data, lead, nurturing_campaign, campaign_participant
+        twilio_data,
+        lead,
+        nurturing_campaign,
+        campaign_participant,
+        crm_campaign=crm_campaign,
+        media_campaign=media_campaign,
     )
 
 
@@ -316,7 +417,9 @@ def build_campaign_response_message(
     lead: Lead,
     nurturing_campaign: LeadNurturingCampaign,
     campaign_participant: LeadNurturingParticipant,
-    step_number: int = 1
+    step_number: int = 1,
+    crm_campaign=None,
+    media_campaign=None,
 ) -> Dict[str, Any]:
     """
     Build a campaign response message with full context.
@@ -353,12 +456,17 @@ def build_campaign_response_message(
     }
     
     return SQSMessageBuilder.build_sms_message(
-        twilio_data, lead, nurturing_campaign, campaign_participant,
-        message_context, metadata
+        twilio_data,
+        lead,
+        nurturing_campaign,
+        campaign_participant,
+        message_context,
+        metadata,
+        crm_campaign=crm_campaign,
+        media_campaign=media_campaign,
     )
 
 
-@staticmethod
 def build_agent_message(
     twilio_data: Dict[str, Any],
     lead: Optional[Lead] = None,
@@ -366,68 +474,19 @@ def build_agent_message(
     campaign_participant: Optional[LeadNurturingParticipant] = None,
     agent_prompt: Optional[str] = None,
     agent_context: Optional[Dict[str, Any]] = None,
-    conversation_history: Optional[list] = None
+    conversation_history: Optional[list] = None,
+    crm_campaign=None,
+    media_campaign=None,
 ) -> Dict[str, Any]:
-    """
-    Build an SMS message specifically for AI agent processing.
-    
-    Args:
-        twilio_data: Raw Twilio webhook data
-        lead: Lead object (optional)
-        nurturing_campaign: Nurturing campaign object (optional)
-        campaign_participant: Campaign participant object (optional)
-        agent_prompt: Custom prompt for the AI agent (optional)
-        agent_context: Additional context for the AI agent (optional)
-        conversation_history: Previous conversation messages (optional)
-        
-    Returns:
-        Enhanced SQS message dictionary with agent mode enabled
-    """
-    # Build base message
-    message = SQSMessageBuilder.build_sms_message(
-        twilio_data, lead, nurturing_campaign, campaign_participant
+    """Module-level wrapper for :meth:`SQSMessageBuilder.build_agent_message`."""
+    return SQSMessageBuilder.build_agent_message(
+        twilio_data,
+        lead,
+        nurturing_campaign,
+        campaign_participant,
+        agent_prompt=agent_prompt,
+        agent_context=agent_context,
+        conversation_history=conversation_history,
+        crm_campaign=crm_campaign,
+        media_campaign=media_campaign,
     )
-    
-    # Enable agent mode
-    message['agent_mode'] = True
-    
-    # Configure agent settings
-    custom_prompt = agent_prompt or f"You are a helpful AI assistant for {nurturing_campaign.name if nurturing_campaign else 'our company'}. Respond naturally and helpfully to customer inquiries."
-    
-    message['agent_config'] = {
-        'enabled': True,
-        'model': 'gpt-4',  # or your preferred model
-        'temperature': 0.7,
-        'max_tokens': 150,
-        'prompt': custom_prompt,
-        'context': {
-            'campaign_name': nurturing_campaign.name if nurturing_campaign else 'General',
-            'campaign_type': nurturing_campaign.campaign_type if nurturing_campaign else 'general',
-            'step_number': message.get('message_context', {}).get('step_number', 1),
-            'conversation_history': conversation_history or [],
-            'campaign_goals': [
-                'Provide helpful information',
-                'Answer customer questions',
-                'Guide customers through the process',
-                'Maintain engagement'
-            ],
-            'response_style': 'friendly and professional',
-            'include_opt_out_info': True,
-            'max_conversation_length': 10,
-            'auto_escalate_to_human': True,
-            'escalation_triggers': [
-                'customer_requests_human',
-                'complex_technical_question',
-                'complaint_or_negative_feedback',
-                'purchase_intent'
-            ]
-        },
-        'fallback_response': "Thanks for your message! I'm here to help. Please let me know if you have any questions.",
-        'escalation_message': "I'm connecting you with a human representative who will be with you shortly. Thank you for your patience!"
-    }
-    
-    # Add agent-specific context if provided
-    if agent_context:
-        message['agent_config']['context'].update(agent_context)
-    
-    return message 

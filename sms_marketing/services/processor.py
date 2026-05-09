@@ -10,6 +10,7 @@ from django.db import transaction
 from external_models.models.communications import ContactEndpoint
 from external_models.models.nurturing_campaigns import BulkCampaignMessage
 from sms_marketing.models import SmsMessage, SmsSubscriber, SmsCampaignEvent, SmsKeywordCampaign
+from sms_marketing.services.attribution import resolve_crm_and_media_campaign
 from sms_marketing.services.router import SMSMarketingRouter
 from sms_marketing.services.state import SMSMarketingStateManager
 from sms_marketing.services.actions import (
@@ -22,6 +23,15 @@ from sms_marketing.services.actions import (
 from sms_marketing.services.message_sender import SMSMarketingMessageSender
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_message_media_campaign_fill(message: SmsMessage, campaign: Optional[SmsKeywordCampaign]) -> None:
+    """Set message.media_campaign from resolver when null (never overwrite)."""
+    if campaign is None or getattr(message, 'media_campaign_id', None):
+        return
+    _, media = resolve_crm_and_media_campaign(campaign)
+    if media is not None:
+        message.media_campaign = media
 
 
 class SMSMarketingProcessor:
@@ -75,6 +85,10 @@ class SMSMarketingProcessor:
             update_fields = ['processing_status']
             if message.in_reply_to_bulk_campaign_message_id is not None:
                 update_fields.append('in_reply_to_bulk_campaign_message_id')
+            if message.sms_campaign_id and message.sms_campaign:
+                _apply_message_media_campaign_fill(message, message.sms_campaign)
+                if getattr(message, 'media_campaign_id', None):
+                    update_fields.append('media_campaign')
             message.save(update_fields=update_fields)
             
             # Get endpoint
@@ -124,13 +138,20 @@ class SMSMarketingProcessor:
                         rule = campaign.rules.filter(
                             keyword__keyword__iexact=subscriber.opt_in_keyword
                         ).first()
+                        _, media_campaign = resolve_crm_and_media_campaign(campaign)
                         # Complete double opt-in (pass rule so subscription gets opt_in_rule)
-                        self.state_manager.handle_double_opt_in_confirmation(subscriber, campaign, rule=rule)
+                        self.state_manager.handle_double_opt_in_confirmation(
+                            subscriber, campaign, rule=rule, media_campaign=media_campaign
+                        )
                         action_config = (rule.action_config or {}) if rule else {}
                         # Link/create lead so we can enroll in follow-up nurturing campaign
-                        link_lead_for_subscriber(subscriber, campaign, action_config)
+                        link_lead_for_subscriber(
+                            subscriber, campaign, action_config, media_campaign=media_campaign
+                        )
                         # Enroll in follow-up nurturing campaign (drip/reminder/blast) if linked
-                        enroll_subscriber_in_follow_up_nurturing(campaign, subscriber, message, rule)
+                        enroll_subscriber_in_follow_up_nurturing(
+                            campaign, subscriber, message, rule, media_campaign=media_campaign
+                        )
                         welcome_body = get_welcome_message_for_opt_in(campaign, rule, action_config) if rule else None
                         if welcome_body:
                             self.message_sender.send_message(
@@ -139,15 +160,20 @@ class SMSMarketingProcessor:
                                 body=welcome_body,
                                 rule=rule,
                                 message_type='welcome',
+                                media_campaign=media_campaign,
                             )
                         
                         # Update message with campaign/rule/subscriber links
                         message.sms_campaign = campaign  # Field name is sms_campaign
                         message.rule = rule
                         message.subscriber = subscriber
+                        _apply_message_media_campaign_fill(message, campaign)
                         message.processing_status = 'processed'  # Use 'processed' not 'completed'
                         message.processed_at = timezone.now()
-                        message.save(update_fields=['sms_campaign', 'rule', 'subscriber', 'processing_status', 'processed_at'])
+                        _upd = ['sms_campaign', 'rule', 'subscriber', 'processing_status', 'processed_at']
+                        if getattr(message, 'media_campaign_id', None):
+                            _upd.append('media_campaign')
+                        message.save(update_fields=_upd)
                         if subscriber.sms_campaign_id != campaign.id:
                             subscriber.sms_campaign = campaign
                             subscriber.save(update_fields=['sms_campaign_id'])
@@ -160,7 +186,8 @@ class SMSMarketingProcessor:
                                 'confirmed': True,
                                 'opt_in_keyword': subscriber.opt_in_keyword,
                                 'rule_id': rule.id if rule else None,
-                            }
+                            },
+                            media_campaign=media_campaign,
                         )
                         return True
                 else:
@@ -199,9 +226,11 @@ class SMSMarketingProcessor:
             
             # Update message with campaign/rule/subscriber links
             campaign = route_result.campaign
+            _, action_media_campaign = resolve_crm_and_media_campaign(campaign)
             message.sms_campaign = campaign  # Field name is sms_campaign
             message.rule = route_result.rule
             message.subscriber = subscriber
+            _apply_message_media_campaign_fill(message, campaign)
             message.save()
             if subscriber.sms_campaign_id != campaign.id:
                 subscriber.sms_campaign = campaign
@@ -220,7 +249,8 @@ class SMSMarketingProcessor:
                     'keyword_matched': route_result.keyword_matched,
                     'match_type': route_result.match_type,
                     'selected_rule_id': route_result.rule.id if route_result.rule else None,
-                }
+                },
+                media_campaign=action_media_campaign,
             )
             
             # Check subscriber status restrictions
@@ -233,13 +263,18 @@ class SMSMarketingProcessor:
                     message.save(update_fields=['processing_status', 'processed_at', 'error'])
                     
                     self._log_event(
-                        endpoint, route_result.campaign, route_result.rule, subscriber, message,
+                        endpoint,
+                        route_result.campaign,
+                        route_result.rule,
+                        subscriber,
+                        message,
                         'error',
                         {
                             'reason': 'subscriber_opted_out',
                             'keyword_candidate': keyword_candidate,
                             'selected_rule_id': route_result.rule.id if route_result.rule else None,
-                        }
+                        },
+                        media_campaign=action_media_campaign,
                     )
                     return True  # Processed, but blocked
             
@@ -254,7 +289,8 @@ class SMSMarketingProcessor:
                 route_result.rule,
                 subscriber,
                 message,
-                action_config
+                action_config,
+                media_campaign=action_media_campaign,
             )
             event_type = route_result.rule.action_type if route_result.rule else 'unknown'
 
@@ -284,18 +320,24 @@ class SMSMarketingProcessor:
                     'execution_event_type': event_type,
                     'execution_payload': result.data,
                     'error': result.message if not result.success else None,
-                }
+                },
+                media_campaign=action_media_campaign,
             )
 
             # Log event
             self._log_event(
-                endpoint, route_result.campaign, route_result.rule, subscriber, message,
+                endpoint,
+                route_result.campaign,
+                route_result.rule,
+                subscriber,
+                message,
                 event_type,
                 {
                     **result.data,
                     'keyword_candidate': keyword_candidate,
                     'selected_rule_id': route_result.rule.id if route_result.rule else None,
-                }
+                },
+                media_campaign=action_media_campaign,
             )
 
             # Mark as processed if successful
@@ -315,6 +357,7 @@ class SMSMarketingProcessor:
                             rule=route_result.rule,
                             message_type=msg_type,
                             context=ctx,
+                            media_campaign=action_media_campaign,
                         )
                 message.processing_status = 'processed'  # Use 'processed' not 'completed'
                 message.processed_at = timezone.now()
@@ -401,8 +444,15 @@ class SMSMarketingProcessor:
         campaign_context = self._get_campaign_context_for_global_command(endpoint, message)
 
         keyword = self._extract_keyword_candidate(message.body_normalized or message.body_raw)
+        _, global_stop_media = (
+            resolve_crm_and_media_campaign(campaign_context) if campaign_context else (None, None)
+        )
         result = state_manager.handle_opt_out(
-            subscriber, keyword, message=message, campaign=campaign_context
+            subscriber,
+            keyword,
+            message=message,
+            campaign=campaign_context,
+            media_campaign=global_stop_media,
         )
         
         # Update message with subscriber link
@@ -412,9 +462,13 @@ class SMSMarketingProcessor:
             if subscriber.sms_campaign_id != campaign_context.id:
                 subscriber.sms_campaign = campaign_context
                 subscriber.save(update_fields=['sms_campaign_id'])
+        _apply_message_media_campaign_fill(message, campaign_context)
         message.processing_status = 'processed'  # Use 'processed' not 'completed'
         message.processed_at = timezone.now()
-        message.save(update_fields=['subscriber', 'sms_campaign', 'processing_status', 'processed_at'])
+        _go_fields = ['subscriber', 'sms_campaign', 'processing_status', 'processed_at']
+        if getattr(message, 'media_campaign_id', None):
+            _go_fields.append('media_campaign')
+        message.save(update_fields=_go_fields)
         
         # Send opt-out confirmation: endpoint first, then campaign, then default
         sms_settings = getattr(endpoint, 'sms_settings', None)
@@ -429,6 +483,7 @@ class SMSMarketingProcessor:
             body=opt_out_text,
             rule=None,
             message_type='opt_out',
+            media_campaign=global_stop_media,
         )
         
         # Log event
@@ -439,7 +494,8 @@ class SMSMarketingProcessor:
                 'opt_out_keyword': keyword,
                 'was_opted_in': result['was_opted_in'],
                 'keyword_candidate': keyword,
-            }
+            },
+            media_campaign=global_stop_media,
         )
         
         return True
@@ -447,6 +503,9 @@ class SMSMarketingProcessor:
     def _handle_global_help(self, subscriber: SmsSubscriber, message: SmsMessage, endpoint: ContactEndpoint) -> bool:
         """Handle global HELP command"""
         campaign_context = self._get_campaign_context_for_global_command(endpoint, message)
+        _, global_help_media = (
+            resolve_crm_and_media_campaign(campaign_context) if campaign_context else (None, None)
+        )
         # Endpoint first, then campaign, then program, then default
         sms_settings = getattr(endpoint, 'sms_settings', None)
         help_text = (
@@ -462,6 +521,7 @@ class SMSMarketingProcessor:
             body=help_text,
             rule=None,
             message_type='help',
+            media_campaign=global_help_media,
         )
         
         # Update message with subscriber link
@@ -471,9 +531,13 @@ class SMSMarketingProcessor:
             if subscriber.sms_campaign_id != campaign_context.id:
                 subscriber.sms_campaign = campaign_context
                 subscriber.save(update_fields=['sms_campaign_id'])
+        _apply_message_media_campaign_fill(message, campaign_context)
         message.processing_status = 'processed'
         message.processed_at = timezone.now()
-        message.save(update_fields=['subscriber', 'sms_campaign', 'processing_status', 'processed_at'])
+        _gh_fields = ['subscriber', 'sms_campaign', 'processing_status', 'processed_at']
+        if getattr(message, 'media_campaign_id', None):
+            _gh_fields.append('media_campaign')
+        message.save(update_fields=_gh_fields)
         
         # Log event
         self._log_event(
@@ -483,7 +547,8 @@ class SMSMarketingProcessor:
                 'message_type': 'help',
                 'help_text': help_text,
                 'keyword_candidate': self._extract_keyword_candidate(message.body_normalized or message.body_raw),
-            }
+            },
+            media_campaign=global_help_media,
         )
         
         return True
@@ -635,6 +700,7 @@ class SMSMarketingProcessor:
 
         # Link message to chosen campaign for auditability.
         message.sms_campaign = campaign
+        _apply_message_media_campaign_fill(message, campaign)
         if subscriber.sms_campaign_id != campaign.id:
             subscriber.sms_campaign = campaign
             subscriber.save(update_fields=['sms_campaign_id'])
@@ -671,23 +737,31 @@ class SMSMarketingProcessor:
 
         if rendered_body:
             # Apply variable replacement for plain text replies too (templates are already rendered).
+            _, fb_reply_media = resolve_crm_and_media_campaign(campaign)
             success, outbound_sms = self.message_sender.send_message(
                 subscriber=subscriber,
                 campaign=campaign,
                 body=rendered_body,
                 rule=None,
                 message_type='opted_in_fallback',
+                media_campaign=fb_reply_media,
             )
 
             if success:
                 message.processing_status = 'processed'
                 message.processed_at = timezone.now()
-                message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
+                _fb_ok = ['sms_campaign', 'subscriber', 'processing_status', 'processed_at']
+                if getattr(message, 'media_campaign_id', None):
+                    _fb_ok.append('media_campaign')
+                message.save(update_fields=_fb_ok)
             else:
                 message.processing_status = 'failed'
                 message.processed_at = timezone.now()
                 message.error = 'Opted-in fallback reply failed'
-                message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error'])
+                _fb_err = ['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error']
+                if getattr(message, 'media_campaign_id', None):
+                    _fb_err.append('media_campaign')
+                message.save(update_fields=_fb_err)
 
             self._log_event(
                 endpoint,
@@ -704,7 +778,8 @@ class SMSMarketingProcessor:
                     'used_template': used_template,
                     'template_id': template_id,
                     'sms_message_id': getattr(outbound_sms, 'id', None) if outbound_sms else None,
-                }
+                },
+                media_campaign=fb_reply_media,
             )
             return success
 
@@ -723,8 +798,14 @@ class SMSMarketingProcessor:
                     self.keyword = type('Keyword', (), {'keyword': ''})()
 
             fallback_rule = FallbackRule(campaign.fallback_action_type, campaign.fallback_action_config)
+            _, fb_media_campaign = resolve_crm_and_media_campaign(campaign)
             result = execute_action(
-                campaign, fallback_rule, subscriber, message, campaign.fallback_action_config or {}
+                campaign,
+                fallback_rule,
+                subscriber,
+                message,
+                campaign.fallback_action_config or {},
+                media_campaign=fb_media_campaign,
             )
             event_type = campaign.fallback_action_type or 'unknown'
 
@@ -736,12 +817,18 @@ class SMSMarketingProcessor:
             if result.success:
                 message.processing_status = 'processed'
                 message.processed_at = timezone.now()
-                message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
+                _fa_ok = ['sms_campaign', 'subscriber', 'processing_status', 'processed_at']
+                if getattr(message, 'media_campaign_id', None):
+                    _fa_ok.append('media_campaign')
+                message.save(update_fields=_fa_ok)
             else:
                 message.processing_status = 'failed'
                 message.processed_at = timezone.now()
                 message.error = result.message or 'Fallback action failed'
-                message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error'])
+                _fa_err = ['sms_campaign', 'subscriber', 'processing_status', 'processed_at', 'error']
+                if getattr(message, 'media_campaign_id', None):
+                    _fa_err.append('media_campaign')
+                message.save(update_fields=_fa_err)
                 logger.error(
                     f"Fallback action failed for message {message.id}, campaign {campaign.id}: "
                     f"{result.message}"
@@ -758,7 +845,8 @@ class SMSMarketingProcessor:
                     **result.data,
                     'fallback': True,
                     'reason': 'no_keyword_match',
-                }
+                },
+                media_campaign=fb_media_campaign,
             )
             return result.success
 
@@ -770,9 +858,16 @@ class SMSMarketingProcessor:
         message.processing_status = 'processed'
         message.processed_at = timezone.now()
         message.save(update_fields=['sms_campaign', 'subscriber', 'processing_status', 'processed_at'])
+        _, fb_log_media = resolve_crm_and_media_campaign(campaign)
         self._log_event(
-            endpoint, campaign, None, subscriber, message,
-            'message_received', {'fallback': False, 'reason': 'no_keyword_match'}
+            endpoint,
+            campaign,
+            None,
+            subscriber,
+            message,
+            'message_received',
+            {'fallback': False, 'reason': 'no_keyword_match'},
+            media_campaign=fb_log_media,
         )
         return True
     
@@ -784,16 +879,23 @@ class SMSMarketingProcessor:
         subscriber: SmsSubscriber,
         message: SmsMessage,
         event_type: str,
-        payload: Dict[str, Any]
+        payload: Dict[str, Any],
+        media_campaign=None,
     ):
         """Create SmsCampaignEvent log"""
         try:
+            if media_campaign is None:
+                if campaign is not None:
+                    _, media_campaign = resolve_crm_and_media_campaign(campaign)
+                elif message is not None and getattr(message, 'media_campaign_id', None):
+                    media_campaign = message.media_campaign
             SmsCampaignEvent.objects.create(
                 endpoint=endpoint,
                 campaign=campaign,
                 rule=rule,
                 subscriber=subscriber,
                 message=message,
+                media_campaign=media_campaign,
                 event_type=event_type,
                 payload={
                     **payload,

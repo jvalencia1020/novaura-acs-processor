@@ -219,6 +219,15 @@ class SmsMessage(models.Model):
         related_name='sms_messages',
         help_text='Nurturing campaign this message is associated with'
     )
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='sms_messages',
+        help_text='Optional planning media campaign attribution for this message.',
+    )
     rule = models.ForeignKey(
         'SmsKeywordRule',
         on_delete=models.SET_NULL,
@@ -288,6 +297,7 @@ class SmsMessage(models.Model):
             models.Index(fields=['endpoint', 'created_at']),
             models.Index(fields=['account', 'created_at']),
             models.Index(fields=['sms_campaign', 'created_at']),
+            models.Index(fields=['sms_campaign', 'media_campaign', 'created_at']),
             models.Index(fields=['nurturing_campaign', 'created_at']),
             models.Index(fields=['subscriber', 'created_at']),
             models.Index(fields=['direction', 'status']),

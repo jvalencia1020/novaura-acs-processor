@@ -32,6 +32,15 @@ class SmsSubscriberCampaignSubscription(models.Model):
         related_name='sms_campaign_subscriptions',
         help_text='Lead (CRM campaign-scoped) for this subscription. Preferred over subscriber.lead for campaign context. Subscriber.lead kept for backfill/existing integrations.',
     )
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='sms_campaign_subscriptions',
+        help_text='Optional planning media campaign attribution for this subscription.',
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -80,6 +89,8 @@ class SmsSubscriberCampaignSubscription(models.Model):
         indexes = [
             models.Index(fields=['subscriber', 'campaign']),
             models.Index(fields=['campaign', 'status']),
+            models.Index(fields=['campaign', 'media_campaign']),
+            models.Index(fields=['lead']),
         ]
 
     def __str__(self):

@@ -57,6 +57,9 @@ INSTALLED_APPS = [
     # External models for ORM access to existing tables
     'external_models',
     'crm',
+    'planning',
+    'targeting',
+    'catalog',
 ]
 
 MIDDLEWARE = [

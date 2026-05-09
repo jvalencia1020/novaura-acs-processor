@@ -380,5 +380,10 @@ class SMSProcessor(BaseChannelProcessor):
         
         if 'agent_config' in event_data:
             extracted_data['agent_config'] = event_data['agent_config']
+
+        if event_data.get('crm_campaign_id') is not None:
+            extracted_data['crm_campaign_id'] = event_data['crm_campaign_id']
+        if event_data.get('media_campaign_id') is not None:
+            extracted_data['media_campaign_id'] = event_data['media_campaign_id']
         
         return extracted_data 

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from external_models.models.external_references import Campaign
 # LeadNurturingCampaign: use string ref below to avoid circular import (external_models -> journeys -> link_tracking -> campaign_mapping -> external_models)
 
@@ -21,6 +22,18 @@ class LinkCampaignCrmCampaignMapping(models.Model):
         Campaign,
         on_delete=models.CASCADE,
         related_name='link_tracking_campaign_mappings',
+    )
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='link_campaign_crm_mappings',
+        help_text=(
+            'Optional planning media campaign attribution; must belong to the same '
+            'CRM campaign as this mapping when set.'
+        ),
     )
     start_date = models.DateField(
         null=True,
@@ -47,11 +60,41 @@ class LinkCampaignCrmCampaignMapping(models.Model):
     class Meta:
         managed = False
         db_table = 'link_tracking_link_campaign_crm_campaign_mappings'
-        unique_together = [['link_campaign', 'crm_campaign']]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['link_campaign', 'crm_campaign', 'media_campaign'],
+                name='uniq_link_crm_media_campaign',
+            ),
+            models.UniqueConstraint(
+                fields=['link_campaign', 'crm_campaign'],
+                condition=Q(media_campaign__isnull=True),
+                name='uniq_link_crm_no_media_campaign',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['link_campaign', 'crm_campaign', 'media_campaign']),
+            models.Index(fields=['crm_campaign', 'media_campaign', 'is_active']),
+        ]
         ordering = ['-start_date', '-created_at']
 
     def __str__(self):
         return f"{self.link_campaign.campaign_id} → {self.crm_campaign.name}"
+
+    def clean(self):
+        super().clean()
+        if self.media_campaign_id:
+            if not self.crm_campaign_id:
+                raise ValidationError(
+                    {'media_campaign': 'CRM campaign is required when media campaign is set.'}
+                )
+            if self.media_campaign.crm_campaign_id != self.crm_campaign_id:
+                raise ValidationError(
+                    {'media_campaign': 'Media campaign must belong to the selected CRM campaign.'}
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     @property
     def is_current(self):

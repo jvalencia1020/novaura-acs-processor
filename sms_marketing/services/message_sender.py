@@ -10,6 +10,7 @@ from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 
 from sms_marketing.models import SmsMessage, SmsSubscriber, SmsKeywordCampaign, SmsKeywordRule
+from sms_marketing.services.attribution import resolve_crm_and_media_campaign
 from external_models.models.communications import ContactEndpoint
 from external_models.models.messages import MessageTemplate
 from link_tracking.services.runtime_publisher import ensure_link_published
@@ -38,6 +39,7 @@ class SMSMarketingMessageSender:
         rule: Optional[SmsKeywordRule] = None,
         message_type: str = 'regular',
         context: Optional[Dict[str, Any]] = None,
+        media_campaign=None,
     ) -> tuple[bool, Optional[SmsMessage]]:
         """
         Send an SMS marketing message.
@@ -70,6 +72,9 @@ class SMSMarketingMessageSender:
         from_number = endpoint.value
         to_number = subscriber.phone_number
 
+        if media_campaign is None and campaign is not None:
+            _, media_campaign = resolve_crm_and_media_campaign(campaign)
+
         # Create-before-send path: rule has short_link and context provided
         if rule and rule.short_link and context is not None:
             return self._send_message_with_short_link(
@@ -82,6 +87,7 @@ class SMSMarketingMessageSender:
                 from_number=from_number,
                 to_number=to_number,
                 context=context,
+                media_campaign=media_campaign,
             )
 
         # Default path: send first, then create SmsMessage
@@ -113,6 +119,7 @@ class SMSMarketingMessageSender:
                 body_raw=body,
                 body_normalized=body.upper().strip(),
                 sms_campaign=campaign,
+                media_campaign=media_campaign,
                 rule=rule,
                 subscriber=subscriber,
                 account=campaign.account if campaign and hasattr(campaign, 'account') and campaign.account else None,
@@ -154,6 +161,7 @@ class SMSMarketingMessageSender:
                     body_raw=body,
                     body_normalized=body.upper().strip(),
                     sms_campaign=campaign,
+                    media_campaign=media_campaign,
                     rule=rule,
                     subscriber=subscriber,
                     account=campaign.account if campaign and hasattr(campaign, 'account') and campaign.account else None,
@@ -184,6 +192,7 @@ class SMSMarketingMessageSender:
         from_number: str,
         to_number: str,
         context: Dict[str, Any],
+        media_campaign=None,
     ) -> tuple[bool, Optional[SmsMessage]]:
         """Create SmsMessage first, build short URL with sms_msg_id, replace {{link.short_link}}, then send."""
         formatted_to = self._format_phone_number(to_number)
@@ -225,6 +234,7 @@ class SMSMarketingMessageSender:
                 body_raw=body,
                 body_normalized=body.upper().strip() if body else '',
                 sms_campaign=campaign,
+                media_campaign=media_campaign,
                 rule=rule,
                 subscriber=subscriber,
                 account=campaign.account if campaign and hasattr(campaign, 'account') and campaign.account else None,

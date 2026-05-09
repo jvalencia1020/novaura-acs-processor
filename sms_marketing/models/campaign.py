@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.core.exceptions import ValidationError
 from django.conf import settings
 
@@ -21,6 +22,18 @@ class SmsKeywordCampaignCrmCampaign(models.Model):
         Campaign,
         on_delete=models.CASCADE,
         related_name='sms_campaign_relations'
+    )
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='sms_keyword_campaign_crm_mappings',
+        help_text=(
+            'Optional planning media campaign attribution; must belong to the same '
+            'CRM campaign as this mapping when set.'
+        ),
     )
     is_primary = models.BooleanField(
         default=False,
@@ -52,15 +65,43 @@ class SmsKeywordCampaignCrmCampaign(models.Model):
     class Meta:
         managed = False
         db_table = 'sms_keyword_campaign_crm_campaign'
-        unique_together = ('sms_campaign', 'crm_campaign')
+        constraints = [
+            models.UniqueConstraint(
+                fields=['sms_campaign', 'crm_campaign', 'media_campaign'],
+                name='uniq_sms_keyword_crm_media_campaign',
+            ),
+            models.UniqueConstraint(
+                fields=['sms_campaign', 'crm_campaign'],
+                condition=Q(media_campaign__isnull=True),
+                name='uniq_sms_keyword_crm_no_media_campaign',
+            ),
+        ]
         indexes = [
             models.Index(fields=['sms_campaign', 'crm_campaign']),
+            models.Index(fields=['sms_campaign', 'crm_campaign', 'media_campaign']),
+            models.Index(fields=['crm_campaign', 'media_campaign', 'is_active']),
             models.Index(fields=['is_primary']),
         ]
         ordering = ['-start_date', '-assigned_at']
 
     def __str__(self):
         return f"{self.sms_campaign.name} → {self.crm_campaign.name}"
+
+    def clean(self):
+        super().clean()
+        if self.media_campaign_id:
+            if not self.crm_campaign_id:
+                raise ValidationError(
+                    {'media_campaign': 'CRM campaign is required when media campaign is set.'}
+                )
+            if self.media_campaign.crm_campaign_id != self.crm_campaign_id:
+                raise ValidationError(
+                    {'media_campaign': 'Media campaign must belong to the selected CRM campaign.'}
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     @property
     def is_current(self):
@@ -335,3 +376,17 @@ class SmsKeywordCampaign(models.Model):
         """Get the primary CRM campaign if set"""
         relation = self.crm_campaign_relations.filter(is_primary=True).first()
         return relation.crm_campaign if relation else None
+
+    def get_primary_crm_and_media_campaign(self):
+        """
+        Return ``(crm_campaign, media_campaign)`` from the primary active mapping row, or
+        ``(None, None)`` if unset.
+        """
+        relation = (
+            self.crm_campaign_relations.filter(is_primary=True, is_active=True)
+            .select_related('crm_campaign', 'media_campaign')
+            .first()
+        )
+        if relation:
+            return relation.crm_campaign, relation.media_campaign
+        return None, None

@@ -172,6 +172,15 @@ class Lead(models.Model):
     )
 
     campaign = models.ForeignKey('Campaign', on_delete=models.CASCADE, related_name='leads')
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='leads',
+        db_index=True,
+        help_text='Optional planning media flight attribution; must belong to the same CRM campaign as this lead.',
+    )
     funnel = models.ForeignKey('Funnel', on_delete=models.CASCADE, related_name='leads_funnels', null=True)
     first_name = models.CharField(max_length=100, null=True, blank=True)
     last_name = models.CharField(max_length=100, null=True, blank=True)

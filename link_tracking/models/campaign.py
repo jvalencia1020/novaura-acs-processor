@@ -75,6 +75,19 @@ class LinkCampaign(models.Model):
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
 
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='link_campaigns_with_media',
+        help_text=(
+            'Optional planning media campaign default for this link campaign when '
+            'no per-link override is set.'
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -92,6 +105,7 @@ class LinkCampaign(models.Model):
             models.Index(fields=['campaign_id']),
             models.Index(fields=['active']),
             models.Index(fields=['account']),
+            models.Index(fields=['account', 'media_campaign']),
         ]
         # campaign_id unique per account (same id can exist in different accounts)
         unique_together = [['account', 'campaign_id']]

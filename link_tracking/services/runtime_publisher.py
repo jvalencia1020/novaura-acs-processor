@@ -26,6 +26,10 @@ from botocore.exceptions import ClientError
 from django.conf import settings
 
 from link_tracking.models import Domain, GlobalUTMPolicy, Link
+from link_tracking.services.attribution import (
+    resolve_crm_and_media_campaign,
+    resolve_media_campaign_for_link,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +254,13 @@ def build_runtime_record(
         record['keyword'] = str(link.keyword)
     if link.channel:
         record['channel'] = str(link.channel)
+
+    media_campaign = resolve_media_campaign_for_link(link)
+    if media_campaign is not None:
+        record['media_campaign_id'] = str(media_campaign.id)
+    crm_campaign, _ = resolve_crm_and_media_campaign(link.campaign)
+    if crm_campaign is not None:
+        record['crm_campaign_id'] = str(crm_campaign.id)
 
     return record
 

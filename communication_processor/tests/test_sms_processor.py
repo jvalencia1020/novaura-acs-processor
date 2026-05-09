@@ -345,4 +345,24 @@ class SMSProcessorIntegrationTestCase(TestCase):
                         # Verify the returned object
                         self.assertEqual(communication_event.event_type, 'message_received')
                         self.assertEqual(communication_event.lead, self.lead)
-                        self.assertEqual(communication_event.nurturing_campaign, self.nurturing_campaign) 
+                        self.assertEqual(communication_event.nurturing_campaign, self.nurturing_campaign)
+
+    def test_extract_event_data_includes_crm_and_media_campaign_ids(self):
+        raw = {
+            **self.sample_event,
+            'crm_campaign_id': 10,
+            'media_campaign_id': 20,
+        }
+        extracted = self.processor._extract_event_data(raw)
+        self.assertEqual(extracted['crm_campaign_id'], 10)
+        self.assertEqual(extracted['media_campaign_id'], 20)
+
+    def test_extract_event_data_includes_crm_and_media_campaign_ids(self):
+        raw = {
+            **self.sample_event,
+            'crm_campaign_id': 10,
+            'media_campaign_id': 20,
+        }
+        extracted = self.processor._extract_event_data(raw)
+        self.assertEqual(extracted['crm_campaign_id'], 10)
+        self.assertEqual(extracted['media_campaign_id'], 20)

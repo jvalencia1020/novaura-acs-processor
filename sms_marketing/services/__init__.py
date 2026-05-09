@@ -21,6 +21,8 @@ __all__ = [
     'get_welcome_message_for_opt_in',
     'SMSMarketingProcessor',
     'SMSMarketingMessageSender',
+    'resolve_crm_and_media_campaign',
+    'maybe_fill_lead_media_campaign',
 ]
 
 
@@ -38,5 +40,11 @@ def __getattr__(name):
     if name == 'SMSMarketingProcessor':
         from .processor import SMSMarketingProcessor
         return SMSMarketingProcessor
+    if name == 'resolve_crm_and_media_campaign':
+        from .attribution import resolve_crm_and_media_campaign
+        return resolve_crm_and_media_campaign
+    if name == 'maybe_fill_lead_media_campaign':
+        from .lead_attribution import maybe_fill_lead_media_campaign
+        return maybe_fill_lead_media_campaign
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

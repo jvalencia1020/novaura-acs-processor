@@ -68,6 +68,15 @@ class SmsCampaignEvent(models.Model):
         related_name='sms_campaign_events',
         help_text='Nurturing campaign when enrollment events occur'
     )
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='sms_campaign_events',
+        help_text='Optional planning media campaign attribution for this event.',
+    )
     nurturing_participant = models.ForeignKey(
         LeadNurturingParticipant,
         on_delete=models.SET_NULL,

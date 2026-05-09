@@ -50,6 +50,18 @@ class Link(models.Model):
         on_delete=models.PROTECT,
         related_name='links',
     )
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='link_tracking_links',
+        help_text=(
+            'Optional per-link planning media campaign override; when null, '
+            'resolver falls back to link campaign and CRM mapping.'
+        ),
+    )
 
     campaign_identifier = models.CharField(
         max_length=100,
@@ -155,6 +167,7 @@ class Link(models.Model):
             models.Index(fields=['campaign_identifier']),
             models.Index(fields=['active']),
             models.Index(fields=['domain', 'slug_canonical']),
+            models.Index(fields=['campaign', 'media_campaign']),
         ]
 
     def __str__(self):

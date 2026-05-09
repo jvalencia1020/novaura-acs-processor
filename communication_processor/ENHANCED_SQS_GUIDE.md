@@ -58,6 +58,10 @@ This guide explains the enhanced SQS message structure that makes parsing and ma
   "lead_email": "user@example.com",
   "lead_first_name": "John",
   "lead_last_name": "Doe",
+
+  // NEW (optional): CRM / media campaign attribution (SMS keyword + link tracking handoff)
+  "crm_campaign_id": 4242,
+  "media_campaign_id": 9191,
   
   // NEW: Message Context
   "message_context": {

@@ -17,6 +17,8 @@ from sms_marketing.models import (
     SmsSubscriberCampaignSubscription,
 )
 from sms_marketing.services.message_sender import SMSMarketingMessageSender
+from sms_marketing.services.attribution import resolve_crm_and_media_campaign
+from sms_marketing.services.lead_attribution import maybe_fill_lead_media_campaign
 
 logger = logging.getLogger(__name__)
 
@@ -43,28 +45,49 @@ class SMSMarketingActionExecutor:
         rule: SmsKeywordRule,
         subscriber: SmsSubscriber,
         message: SmsMessage,
-        action_config: Dict[str, Any]
+        action_config: Dict[str, Any],
+        media_campaign=None,
     ) -> ExecutionResult:
         """Execute action based on rule.action_type"""
         action_type = rule.action_type
-        
+        if media_campaign is not None:
+            eff_media = media_campaign
+        else:
+            _, eff_media = resolve_crm_and_media_campaign(campaign)
+
         try:
             if action_type == 'OPT_IN':
-                return self._handle_opt_in(campaign, rule, subscriber, message, action_config)
+                return self._handle_opt_in(
+                    campaign, rule, subscriber, message, action_config, media_campaign=eff_media
+                )
             elif action_type == 'OPT_OUT':
-                return self._handle_opt_out(campaign, rule, subscriber, message, action_config)
+                return self._handle_opt_out(
+                    campaign, rule, subscriber, message, action_config, media_campaign=eff_media
+                )
             elif action_type == 'HELP':
-                return self._handle_help(campaign, rule, subscriber, message, action_config)
+                return self._handle_help(
+                    campaign, rule, subscriber, message, action_config, media_campaign=eff_media
+                )
             elif action_type == 'SEND_TEMPLATE':
-                return self._handle_send_template(campaign, rule, subscriber, message, action_config)
+                return self._handle_send_template(
+                    campaign, rule, subscriber, message, action_config, media_campaign=eff_media
+                )
             elif action_type == 'START_JOURNEY':
-                return self._handle_start_journey(campaign, rule, subscriber, message, action_config)
+                return self._handle_start_journey(
+                    campaign, rule, subscriber, message, action_config, media_campaign=eff_media
+                )
             elif action_type == 'CREATE_LEAD':
-                return self._handle_create_lead(campaign, rule, subscriber, message, action_config)
+                return self._handle_create_lead(
+                    campaign, rule, subscriber, message, action_config, media_campaign=eff_media
+                )
             elif action_type == 'ROUTE_TO_AGENT':
-                return self._handle_route_to_agent(campaign, rule, subscriber, message, action_config)
+                return self._handle_route_to_agent(
+                    campaign, rule, subscriber, message, action_config, media_campaign=eff_media
+                )
             elif action_type == 'COMPOSITE':
-                return self._handle_composite(campaign, rule, subscriber, message, action_config)
+                return self._handle_composite(
+                    campaign, rule, subscriber, message, action_config, media_campaign=eff_media
+                )
             else:
                 return ExecutionResult(
                     False,
@@ -81,33 +104,43 @@ class SMSMarketingActionExecutor:
                 str(e)
             )
     
-    def _handle_opt_in(self, campaign, rule, subscriber, message, action_config):
+    def _handle_opt_in(self, campaign, rule, subscriber, message, action_config, media_campaign=None):
         """Handle OPT_IN action"""
         from sms_marketing.services.state import SMSMarketingStateManager
         state_manager = SMSMarketingStateManager()
         
         keyword = rule.keyword.keyword
         result = state_manager.handle_opt_in(
-            subscriber, campaign, rule, campaign.opt_in_mode, keyword, message=message
+            subscriber,
+            campaign,
+            rule,
+            campaign.opt_in_mode,
+            keyword,
+            message=message,
+            media_campaign=media_campaign,
         )
         
         # Link lead if available
-        lead = self._link_or_create_lead(subscriber, campaign, action_config)
+        lead = self._link_or_create_lead(subscriber, campaign, action_config, media_campaign=media_campaign)
         
         # When opt-in is confirmed, enroll in follow-up nurturing campaign if linked (drip/reminder/blast)
         nurturing_participant = None
         if result['confirmed']:
             nurturing_participant = self._enroll_in_follow_up_nurturing_campaign_if_applicable(
-                campaign, subscriber, message, rule=rule
+                campaign, subscriber, message, rule=rule, media_campaign=media_campaign
             )
         
         # Send confirmation/welcome message
         if result['confirmed']:
             # Single opt-in: send welcome message
-            self._send_welcome_message(campaign, rule, subscriber, action_config)
+            self._send_welcome_message(
+                campaign, rule, subscriber, action_config, media_campaign=media_campaign
+            )
         else:
             # Double opt-in: send confirmation request
-            self._send_confirmation_request(campaign, rule, subscriber, action_config)
+            self._send_confirmation_request(
+                campaign, rule, subscriber, action_config, media_campaign=media_campaign
+            )
         
         payload = {
             'campaign_id': campaign.id,
@@ -123,16 +156,18 @@ class SMSMarketingActionExecutor:
             payload['nurturing_campaign_id'] = nurturing_participant.nurturing_campaign_id
         return ExecutionResult(True, 'opt_in', payload)
 
-    def _handle_opt_out(self, campaign, rule, subscriber, message, action_config):
+    def _handle_opt_out(self, campaign, rule, subscriber, message, action_config, media_campaign=None):
         """Handle OPT_OUT action"""
         from sms_marketing.services.state import SMSMarketingStateManager
         state_manager = SMSMarketingStateManager()
         
         keyword = rule.keyword.keyword if rule else 'STOP'
-        result = state_manager.handle_opt_out(subscriber, keyword, message=message, campaign=campaign)
+        result = state_manager.handle_opt_out(
+            subscriber, keyword, message=message, campaign=campaign, media_campaign=media_campaign
+        )
         
         # Send opt-out confirmation
-        self._send_opt_out_confirmation(subscriber, campaign)
+        self._send_opt_out_confirmation(subscriber, campaign, media_campaign=media_campaign)
         
         return ExecutionResult(
             True,
@@ -144,7 +179,7 @@ class SMSMarketingActionExecutor:
             }
         )
     
-    def _handle_help(self, campaign, rule, subscriber, message, action_config):
+    def _handle_help(self, campaign, rule, subscriber, message, action_config, media_campaign=None):
         """Handle HELP action. Endpoint first, then action_config, campaign, program, default."""
         endpoint = getattr(subscriber, 'endpoint', None)
         sms_settings = getattr(endpoint, 'sms_settings', None) if endpoint else None
@@ -162,7 +197,8 @@ class SMSMarketingActionExecutor:
             campaign=campaign,
             body=help_text,
             rule=rule,
-            message_type='help'
+            message_type='help',
+            media_campaign=media_campaign,
         )
         
         return ExecutionResult(
@@ -176,7 +212,7 @@ class SMSMarketingActionExecutor:
             error=None if success else 'Failed to send help message'
         )
     
-    def _handle_send_template(self, campaign, rule, subscriber, message, action_config):
+    def _handle_send_template(self, campaign, rule, subscriber, message, action_config, media_campaign=None):
         """Handle SEND_TEMPLATE action"""
         template_id = action_config.get('template_id')
         if not template_id:
@@ -201,7 +237,8 @@ class SMSMarketingActionExecutor:
             campaign=campaign,
             body=rendered_content,
             rule=rule,
-            message_type='template'
+            message_type='template',
+            media_campaign=media_campaign,
         )
         
         return ExecutionResult(
@@ -215,7 +252,7 @@ class SMSMarketingActionExecutor:
             error=None if success else 'Failed to send template message'
         )
     
-    def _handle_start_journey(self, campaign, rule, subscriber, message, action_config):
+    def _handle_start_journey(self, campaign, rule, subscriber, message, action_config, media_campaign=None):
         """Handle START_JOURNEY action"""
         nurturing_campaign_id = (
             action_config.get('nurturing_campaign_id') or
@@ -232,19 +269,27 @@ class SMSMarketingActionExecutor:
 
         # Get or create campaign-level subscription; use its lead (campaign-scoped)
         now = timezone.now()
+        sj_defaults = {
+            'status': 'opted_in',
+            'opted_in_at': now,
+            'opt_in_message': message,
+            'opt_in_rule': rule,
+        }
+        if media_campaign is not None:
+            sj_defaults['media_campaign'] = media_campaign
         subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
             subscriber=subscriber,
             campaign=campaign,
-            defaults={
-                'status': 'opted_in',
-                'opted_in_at': now,
-                'opt_in_message': message,
-                'opt_in_rule': rule,
-            },
+            defaults=sj_defaults,
         )
         lead = subscription.lead
         if not lead:
-            lead = self._link_or_create_lead(subscriber, campaign, action_config or {'create_lead_if_missing': True})
+            lead = self._link_or_create_lead(
+                subscriber,
+                campaign,
+                action_config or {'create_lead_if_missing': True},
+                media_campaign=media_campaign,
+            )
         if not lead:
             return ExecutionResult(False, 'error', {'error': 'Subscriber has no linked lead'}, 'Subscriber has no linked lead')
         created_by_id = getattr(nurturing_campaign, 'created_by_id', None)
@@ -261,6 +306,9 @@ class SMSMarketingActionExecutor:
         if subscription.lead_id is None and lead is not None:
             subscription.lead = lead
             update_sub.append('lead')
+        if getattr(subscription, 'media_campaign_id', None) is None and media_campaign is not None:
+            subscription.media_campaign = media_campaign
+            update_sub.append('media_campaign')
         if update_sub:
             subscription.save(update_fields=update_sub)
 
@@ -295,39 +343,47 @@ class SMSMarketingActionExecutor:
             }
         )
     
-    def _handle_create_lead(self, campaign, rule, subscriber, message, action_config):
+    def _handle_create_lead(self, campaign, rule, subscriber, message, action_config, media_campaign=None):
         """
         Handle CREATE_LEAD action.
 
         Uses crm.services.lead_dedup: find by campaign/account + phone/email,
         update or create, then set subscriber.lead and subscription.lead (doc item 1).
         """
+        crm_campaign, resolved_media = resolve_crm_and_media_campaign(campaign)
+        if media_campaign is not None:
+            resolved_media = media_campaign
+        if not crm_campaign:
+            return ExecutionResult(
+                False, 'error',
+                {'error': 'Campaign has no linked CRM campaign; cannot create lead'},
+                'Campaign has no linked CRM campaign'
+            )
+
         try:
             from crm.services.lead_dedup import create_or_update_lead
         except ImportError:
             from external_models.models.external_references import Lead
             # Fallback if lead_dedup not available
             lead_data = dict(action_config.get('lead_data', {}))
-            crm_campaign = campaign.get_primary_crm_campaign()
-            if not crm_campaign:
-                rel = getattr(campaign, 'crm_campaign_relations', None)
-                if rel:
-                    first_rel = rel.filter(is_active=True).first()
-                    crm_campaign = first_rel.crm_campaign if first_rel else None
-            if not crm_campaign:
-                return ExecutionResult(
-                    False, 'error',
-                    {'error': 'Campaign has no linked CRM campaign; cannot create lead'},
-                    'Campaign has no linked CRM campaign'
-                )
             lead_data.setdefault('campaign', crm_campaign)
             phone_formatted = self._normalize_phone_for_lead_storage(subscriber.phone_number)
             lead_data.setdefault('phone_number', phone_formatted or subscriber.phone_number)
             lead_data.pop('account', None)
             lead = Lead.objects.create(**lead_data)
-            SmsSubscriberCampaignSubscription.objects.filter(
+            maybe_fill_lead_media_campaign(lead, crm_campaign, resolved_media)
+            for sub in SmsSubscriberCampaignSubscription.objects.filter(
                 subscriber=subscriber, campaign=campaign
-            ).update(lead=lead)
+            ):
+                upd = []
+                if sub.lead_id != lead.id:
+                    sub.lead = lead
+                    upd.append('lead')
+                if resolved_media is not None and sub.media_campaign_id is None:
+                    sub.media_campaign = resolved_media
+                    upd.append('media_campaign')
+                if upd:
+                    sub.save(update_fields=upd)
             if not subscriber.lead_id:
                 subscriber.lead = lead
                 subscriber.save(update_fields=['lead_id'])
@@ -337,18 +393,6 @@ class SMSMarketingActionExecutor:
         phone_formatted = self._normalize_phone_for_lead_storage(subscriber.phone_number)
         phone_number = phone_formatted or subscriber.phone_number
         email = lead_data.get('email')
-        crm_campaign = campaign.get_primary_crm_campaign()
-        if not crm_campaign:
-            rel = getattr(campaign, 'crm_campaign_relations', None)
-            if rel:
-                first_rel = rel.filter(is_active=True).first()
-                crm_campaign = first_rel.crm_campaign if first_rel else None
-        if not crm_campaign:
-            return ExecutionResult(
-                False, 'error',
-                {'error': 'Campaign has no linked CRM campaign; cannot create lead'},
-                'Campaign has no linked CRM campaign'
-            )
 
         lead, created_new = create_or_update_lead(
             campaign=crm_campaign,
@@ -358,15 +402,25 @@ class SMSMarketingActionExecutor:
             lead_data=lead_data,
             lead_type=None,
         )
+        maybe_fill_lead_media_campaign(lead, crm_campaign, resolved_media)
         if not created_new:
             logger.info(
                 "CREATE_LEAD: found existing lead id=%s (campaign + contact), updated and linked subscriber",
                 lead.id,
             )
 
-        SmsSubscriberCampaignSubscription.objects.filter(
+        for sub in SmsSubscriberCampaignSubscription.objects.filter(
             subscriber=subscriber, campaign=campaign
-        ).update(lead=lead)
+        ):
+            upd = []
+            if sub.lead_id != lead.id:
+                sub.lead = lead
+                upd.append('lead')
+            if resolved_media is not None and sub.media_campaign_id is None:
+                sub.media_campaign = resolved_media
+                upd.append('media_campaign')
+            if upd:
+                sub.save(update_fields=upd)
         if not subscriber.lead_id:
             subscriber.lead = lead
             subscriber.save(update_fields=['lead_id'])
@@ -377,7 +431,7 @@ class SMSMarketingActionExecutor:
             {'lead_id': lead.id, 'lead_created': created_new}
         )
     
-    def _handle_route_to_agent(self, campaign, rule, subscriber, message, action_config):
+    def _handle_route_to_agent(self, campaign, rule, subscriber, message, action_config, media_campaign=None):
         """Handle ROUTE_TO_AGENT action"""
         # Get or create conversation
         conversation = self._get_or_create_conversation(subscriber, campaign.endpoint, subscriber.lead)
@@ -411,7 +465,7 @@ class SMSMarketingActionExecutor:
             }
         )
     
-    def _handle_composite(self, campaign, rule, subscriber, message, action_config):
+    def _handle_composite(self, campaign, rule, subscriber, message, action_config, media_campaign=None):
         """Handle COMPOSITE action"""
         actions = action_config.get('actions', [])
         execution_mode = action_config.get('execution_mode', 'sequential')
@@ -431,7 +485,14 @@ class SMSMarketingActionExecutor:
             
             temp_rule = TempRule(action_type, action_config_item)
             
-            result = self.execute_action(campaign, temp_rule, subscriber, message, action_config_item)
+            result = self.execute_action(
+                campaign,
+                temp_rule,
+                subscriber,
+                message,
+                action_config_item,
+                media_campaign=media_campaign,
+            )
             results.append({
                 'type': action_type,
                 'success': result.success,
@@ -468,7 +529,13 @@ class SMSMarketingActionExecutor:
             return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
         return phone_number.strip() or None
 
-    def _link_or_create_lead(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign, action_config: Dict):
+    def _link_or_create_lead(
+        self,
+        subscriber: SmsSubscriber,
+        campaign: SmsKeywordCampaign,
+        action_config: Dict,
+        media_campaign=None,
+    ):
         """
         Resolve the lead for this (subscriber, campaign) and set subscription.lead.
 
@@ -477,12 +544,8 @@ class SMSMarketingActionExecutor:
         campaign and set SmsSubscriberCampaignSubscription.lead (not subscriber.lead
         first). Subscriber.lead is only backfilled when null for backward compatibility.
         """
-        crm_campaign = campaign.get_primary_crm_campaign()
-        if not crm_campaign:
-            rel = getattr(campaign, 'crm_campaign_relations', None)
-            if rel:
-                first_rel = rel.filter(is_active=True).first()
-                crm_campaign = first_rel.crm_campaign if first_rel else None
+        crm_campaign, resolved_media = resolve_crm_and_media_campaign(campaign)
+        eff_media = media_campaign if media_campaign is not None else resolved_media
         if not crm_campaign:
             logger.warning(
                 "Cannot create lead for subscriber %s: SmsKeywordCampaign %s has no CRM campaign",
@@ -532,10 +595,20 @@ class SMSMarketingActionExecutor:
         if not lead:
             return None
 
-        # Always set subscription.lead for this (subscriber, campaign) – campaign-scoped
-        SmsSubscriberCampaignSubscription.objects.filter(
+        # Always set subscription.lead for this (subscriber, campaign) – campaign-scoped;
+        # fill media_campaign only when missing (never overwrite).
+        for sub in SmsSubscriberCampaignSubscription.objects.filter(
             subscriber=subscriber, campaign=campaign
-        ).update(lead=lead)
+        ):
+            upd = []
+            if sub.lead_id != lead.id:
+                sub.lead = lead
+                upd.append('lead')
+            if eff_media is not None and sub.media_campaign_id is None:
+                sub.media_campaign = eff_media
+                upd.append('media_campaign')
+            if upd:
+                sub.save(update_fields=upd)
 
         # Backfill subscriber.lead only when null so code that reads subscriber.lead
         # still gets a lead; we do not overwrite with another campaign's lead
@@ -551,6 +624,7 @@ class SMSMarketingActionExecutor:
         subscriber,
         message,
         rule=None,
+        media_campaign=None,
     ):
         """
         When campaign has follow_up_nurturing_campaign, always enroll the subscriber into that
@@ -563,19 +637,27 @@ class SMSMarketingActionExecutor:
             return None
 
         # Use campaign-scoped lead (subscription.lead), not subscriber.lead
+        enroll_defaults = {
+            'status': 'opted_in',
+            'opted_in_at': timezone.now(),
+            'opt_in_message': message,
+            'opt_in_rule': rule,
+        }
+        if media_campaign is not None:
+            enroll_defaults['media_campaign'] = media_campaign
         subscription, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
             subscriber=subscriber,
             campaign=campaign,
-            defaults={
-                'status': 'opted_in',
-                'opted_in_at': timezone.now(),
-                'opt_in_message': message,
-                'opt_in_rule': rule,
-            },
+            defaults=enroll_defaults,
         )
         lead = subscription.lead
         if not lead:
-            lead = self._link_or_create_lead(subscriber, campaign, {'create_lead_if_missing': True})
+            lead = self._link_or_create_lead(
+                subscriber,
+                campaign,
+                {'create_lead_if_missing': True},
+                media_campaign=media_campaign,
+            )
         if not lead:
             return None
 
@@ -599,6 +681,9 @@ class SMSMarketingActionExecutor:
         if subscription.lead_id is None and lead is not None:
             subscription.lead = lead
             update_sub.append('lead')
+        if getattr(subscription, 'media_campaign_id', None) is None and media_campaign is not None:
+            subscription.media_campaign = media_campaign
+            update_sub.append('media_campaign')
         if update_sub:
             subscription.save(update_fields=update_sub)
 
@@ -642,7 +727,8 @@ class SMSMarketingActionExecutor:
         campaign: Optional[SmsKeywordCampaign],
         body: str,
         rule: Optional[SmsKeywordRule] = None,
-        message_type: str = 'regular'
+        message_type: str = 'regular',
+        media_campaign=None,
     ):
         """
         Send SMS message using SMSMarketingMessageSender.
@@ -663,6 +749,7 @@ class SMSMarketingActionExecutor:
                 rule=rule,
                 message_type=message_type,
                 context=context,
+                media_campaign=media_campaign,
             )
         rendered_body = self._render_plain_text(body, subscriber=subscriber, campaign=campaign, rule=rule)
         return self.message_sender.send_message(
@@ -671,6 +758,7 @@ class SMSMarketingActionExecutor:
             body=rendered_body,
             rule=rule,
             message_type=message_type,
+            media_campaign=media_campaign,
         )
 
     def _build_message_context(
@@ -741,7 +829,14 @@ class SMSMarketingActionExecutor:
             logger.warning(f"Variable replacement failed; sending raw body. error={e}")
             return body
     
-    def _send_welcome_message(self, campaign: SmsKeywordCampaign, rule: Optional[SmsKeywordRule], subscriber: SmsSubscriber, action_config: Dict):
+    def _send_welcome_message(
+        self,
+        campaign: SmsKeywordCampaign,
+        rule: Optional[SmsKeywordRule],
+        subscriber: SmsSubscriber,
+        action_config: Dict,
+        media_campaign=None,
+    ):
         """Send welcome message after opt-in"""
         template_id = action_config.get('template_id')
         welcome_text = action_config.get('welcome_message')
@@ -750,18 +845,53 @@ class SMSMarketingActionExecutor:
         # Priority (per design doc):
         # 1) rule.initial_reply -> 2) action_config.template_id -> 3) action_config.welcome_message -> 4) campaign.welcome_message
         if rule_initial_reply:
-            self._send_message(subscriber, campaign, rule_initial_reply, rule=rule, message_type='welcome')
+            self._send_message(
+                subscriber,
+                campaign,
+                rule_initial_reply,
+                rule=rule,
+                message_type='welcome',
+                media_campaign=media_campaign,
+            )
         elif template_id:
             # Use template
-            self._handle_send_template(campaign, None, subscriber, None, {'template_id': template_id})
+            self._handle_send_template(
+                campaign,
+                None,
+                subscriber,
+                None,
+                {'template_id': template_id},
+                media_campaign=media_campaign,
+            )
         elif welcome_text:
             # Use direct text
-            self._send_message(subscriber, campaign, welcome_text, rule=rule, message_type='welcome')
+            self._send_message(
+                subscriber,
+                campaign,
+                welcome_text,
+                rule=rule,
+                message_type='welcome',
+                media_campaign=media_campaign,
+            )
         elif hasattr(campaign, 'welcome_message') and campaign.welcome_message:
             # Use campaign default
-            self._send_message(subscriber, campaign, campaign.welcome_message, rule=rule, message_type='welcome')
+            self._send_message(
+                subscriber,
+                campaign,
+                campaign.welcome_message,
+                rule=rule,
+                message_type='welcome',
+                media_campaign=media_campaign,
+            )
     
-    def _send_confirmation_request(self, campaign: SmsKeywordCampaign, rule: Optional[SmsKeywordRule], subscriber: SmsSubscriber, action_config: Dict):
+    def _send_confirmation_request(
+        self,
+        campaign: SmsKeywordCampaign,
+        rule: Optional[SmsKeywordRule],
+        subscriber: SmsSubscriber,
+        action_config: Dict,
+        media_campaign=None,
+    ):
         """Send double opt-in confirmation request"""
         confirmation_text = (
             (getattr(rule, 'confirmation_message', None) if rule else None) or
@@ -769,9 +899,21 @@ class SMSMarketingActionExecutor:
             getattr(campaign, 'confirmation_message', None) or
             "Reply YES to confirm your opt-in."
         )
-        self._send_message(subscriber, campaign, confirmation_text, rule=rule, message_type='confirmation')
+        self._send_message(
+            subscriber,
+            campaign,
+            confirmation_text,
+            rule=rule,
+            message_type='confirmation',
+            media_campaign=media_campaign,
+        )
     
-    def _send_opt_out_confirmation(self, subscriber: SmsSubscriber, campaign: SmsKeywordCampaign):
+    def _send_opt_out_confirmation(
+        self,
+        subscriber: SmsSubscriber,
+        campaign: SmsKeywordCampaign,
+        media_campaign=None,
+    ):
         """Send opt-out confirmation. Endpoint first, then campaign, then default."""
         endpoint = getattr(subscriber, 'endpoint', None)
         sms_settings = getattr(endpoint, 'sms_settings', None) if endpoint else None
@@ -780,7 +922,13 @@ class SMSMarketingActionExecutor:
             or getattr(campaign, 'opt_out_message', None)
             or "You have been unsubscribed. You will no longer receive messages."
         )
-        self._send_message(subscriber, campaign, opt_out_text, message_type='opt_out')
+        self._send_message(
+            subscriber,
+            campaign,
+            opt_out_text,
+            message_type='opt_out',
+            media_campaign=media_campaign,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -803,11 +951,17 @@ def execute_action(
     subscriber: SmsSubscriber,
     message: SmsMessage,
     action_config: Optional[Dict[str, Any]] = None,
+    media_campaign=None,
 ) -> ActionExecutionResult:
     """Execute action via SMSMarketingActionExecutor. Returns ActionExecutionResult for processor."""
     executor = SMSMarketingActionExecutor()
     result = executor.execute_action(
-        campaign, rule, subscriber, message, action_config or {}
+        campaign,
+        rule,
+        subscriber,
+        message,
+        action_config or {},
+        media_campaign=media_campaign,
     )
     return ActionExecutionResult(
         success=result.success,
@@ -820,10 +974,13 @@ def link_lead_for_subscriber(
     subscriber: SmsSubscriber,
     campaign: SmsKeywordCampaign,
     config: Optional[Dict[str, Any]] = None,
+    media_campaign=None,
 ):
     """Link or create lead for subscriber and set subscription.lead (doc item 1). Used after double opt-in."""
     executor = SMSMarketingActionExecutor()
-    return executor._link_or_create_lead(subscriber, campaign, config or {})
+    return executor._link_or_create_lead(
+        subscriber, campaign, config or {}, media_campaign=media_campaign
+    )
 
 
 def enroll_subscriber_in_follow_up_nurturing(
@@ -831,11 +988,12 @@ def enroll_subscriber_in_follow_up_nurturing(
     subscriber: SmsSubscriber,
     message: SmsMessage,
     rule: Optional[SmsKeywordRule] = None,
+    media_campaign=None,
 ):
     """Enroll subscriber in follow_up_nurturing_campaign with originating_subscription (doc item 2)."""
     executor = SMSMarketingActionExecutor()
     return executor._enroll_in_follow_up_nurturing_campaign_if_applicable(
-        campaign, subscriber, message, rule=rule
+        campaign, subscriber, message, rule=rule, media_campaign=media_campaign
     )
 
 

@@ -18,6 +18,11 @@ from sms_marketing.models import (
 logger = logging.getLogger(__name__)
 
 
+def _subscription_fill_media_campaign(sub, media_campaign) -> None:
+    if media_campaign is not None and not getattr(sub, 'media_campaign_id', None):
+        sub.media_campaign = media_campaign
+
+
 class SMSMarketingStateManager:
     """Manages subscriber state transitions"""
     
@@ -51,7 +56,8 @@ class SMSMarketingStateManager:
         rule,
         opt_in_mode: str,  # 'single', 'double', 'none'
         keyword: str,
-        message: Optional[SmsMessage] = None
+        message: Optional[SmsMessage] = None,
+        media_campaign=None,
     ) -> Dict:
         """
         Handle opt-in state transition.
@@ -77,15 +83,18 @@ class SMSMarketingStateManager:
             subscriber.sms_campaign = campaign
             subscriber.save()
             # Per-campaign subscription: one row per (subscriber, campaign)
+            sub_defaults = {
+                'status': 'opted_in',
+                'opted_in_at': now,
+                'opt_in_message': message,
+                'opt_in_rule': rule,
+            }
+            if media_campaign is not None:
+                sub_defaults['media_campaign'] = media_campaign
             sub, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
                 subscriber=subscriber,
                 campaign=campaign,
-                defaults={
-                    'status': 'opted_in',
-                    'opted_in_at': now,
-                    'opt_in_message': message,
-                    'opt_in_rule': rule,
-                },
+                defaults=sub_defaults,
             )
             if sub.status == 'opted_out':
                 sub.opted_out_at = None
@@ -95,7 +104,13 @@ class SMSMarketingStateManager:
             sub.opt_in_message = message
             if rule is not None:
                 sub.opt_in_rule = rule
-            sub.save(update_fields=['status', 'opted_in_at', 'opt_in_message', 'opted_out_at', 'opt_out_message'] + (['opt_in_rule'] if rule is not None else []))
+            _subscription_fill_media_campaign(sub, media_campaign)
+            _upd = ['status', 'opted_in_at', 'opt_in_message', 'opted_out_at', 'opt_out_message'] + (
+                ['opt_in_rule'] if rule is not None else []
+            )
+            if getattr(sub, 'media_campaign_id', None) and 'media_campaign' not in _upd:
+                _upd.append('media_campaign')
+            sub.save(update_fields=_upd)
             return {'status': 'opted_in', 'confirmed': True}
 
         elif opt_in_mode == 'double':
@@ -110,15 +125,18 @@ class SMSMarketingStateManager:
             subscriber.sms_campaign = campaign
             subscriber.save()
             # Per-campaign subscription: pending until they reply YES (see handle_double_opt_in_confirmation)
+            dbl_defaults = {
+                'status': 'pending_opt_in',
+                'opted_in_at': now,
+                'opt_in_message': message,
+                'opt_in_rule': rule,
+            }
+            if media_campaign is not None:
+                dbl_defaults['media_campaign'] = media_campaign
             sub, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
                 subscriber=subscriber,
                 campaign=campaign,
-                defaults={
-                    'status': 'pending_opt_in',
-                    'opted_in_at': now,
-                    'opt_in_message': message,
-                    'opt_in_rule': rule,
-                },
+                defaults=dbl_defaults,
             )
             if sub.status == 'opted_out':
                 sub.opted_out_at = None
@@ -128,7 +146,13 @@ class SMSMarketingStateManager:
             sub.opt_in_message = message  # Always the initial START message that triggered the flow
             if rule is not None:
                 sub.opt_in_rule = rule
-            sub.save(update_fields=['status', 'opted_in_at', 'opt_in_message', 'opted_out_at', 'opt_out_message'] + (['opt_in_rule'] if rule is not None else []))
+            _subscription_fill_media_campaign(sub, media_campaign)
+            _upd_d = ['status', 'opted_in_at', 'opt_in_message', 'opted_out_at', 'opt_out_message'] + (
+                ['opt_in_rule'] if rule is not None else []
+            )
+            if getattr(sub, 'media_campaign_id', None) and 'media_campaign' not in _upd_d:
+                _upd_d.append('media_campaign')
+            sub.save(update_fields=_upd_d)
             return {'status': 'pending_opt_in', 'confirmed': False}
 
         return {'status': subscriber.status, 'confirmed': False}
@@ -139,6 +163,7 @@ class SMSMarketingStateManager:
         subscriber: SmsSubscriber,
         campaign: SmsKeywordCampaign,
         rule=None,
+        media_campaign=None,
     ) -> bool:
         """
         Complete double opt-in confirmation (subscriber replied YES).
@@ -163,7 +188,11 @@ class SMSMarketingStateManager:
             sub.opted_in_at = now  # When they confirmed (opt_in_message remains the START message)
             if rule is not None:
                 sub.opt_in_rule = rule
-            sub.save(update_fields=['status', 'opted_in_at'] + (['opt_in_rule'] if rule is not None else []))
+            _subscription_fill_media_campaign(sub, media_campaign)
+            _doup = ['status', 'opted_in_at'] + (['opt_in_rule'] if rule is not None else [])
+            if getattr(sub, 'media_campaign_id', None) and 'media_campaign' not in _doup:
+                _doup.append('media_campaign')
+            sub.save(update_fields=_doup)
         except SmsSubscriberCampaignSubscription.DoesNotExist:
             logger.warning(
                 f"No SmsSubscriberCampaignSubscription for subscriber={subscriber.id} campaign={campaign.id}; creating"
@@ -176,6 +205,8 @@ class SMSMarketingStateManager:
             }
             if rule is not None:
                 create_kw['opt_in_rule'] = rule
+            if media_campaign is not None:
+                create_kw['media_campaign'] = media_campaign
             SmsSubscriberCampaignSubscription.objects.create(**create_kw)
         return True
     
@@ -186,6 +217,7 @@ class SMSMarketingStateManager:
         keyword: str,
         message: Optional[SmsMessage] = None,
         campaign: Optional[SmsKeywordCampaign] = None,
+        media_campaign=None,
     ) -> Dict:
         """
         Handle opt-out state transition.
@@ -214,20 +246,27 @@ class SMSMarketingStateManager:
 
         # Per-campaign subscriptions: mark all as opted_out; only current campaign row gets opt_out_message
         if campaign:
+            oo_defaults = {
+                'status': 'opted_out',
+                'opted_in_at': now,
+                'opted_out_at': now,
+                'opt_out_message': message,
+            }
+            if media_campaign is not None:
+                oo_defaults['media_campaign'] = media_campaign
             sub, _ = SmsSubscriberCampaignSubscription.objects.get_or_create(
                 subscriber=subscriber,
                 campaign=campaign,
-                defaults={
-                    'status': 'opted_out',
-                    'opted_in_at': now,
-                    'opted_out_at': now,
-                    'opt_out_message': message,
-                },
+                defaults=oo_defaults,
             )
             sub.status = 'opted_out'
             sub.opted_out_at = now
             sub.opt_out_message = message
-            sub.save(update_fields=['status', 'opted_out_at', 'opt_out_message'])
+            _subscription_fill_media_campaign(sub, media_campaign)
+            _oo_fields = ['status', 'opted_out_at', 'opt_out_message']
+            if getattr(sub, 'media_campaign_id', None) and 'media_campaign' not in _oo_fields:
+                _oo_fields.append('media_campaign')
+            sub.save(update_fields=_oo_fields)
 
             # Global STOP: all other subscriptions for this subscriber get same opted_out_at, no opt_out_message
             other_subs = SmsSubscriberCampaignSubscription.objects.filter(
