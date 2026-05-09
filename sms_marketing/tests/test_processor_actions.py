@@ -1,12 +1,12 @@
 """
-SMS marketing service tests.
+SMS marketing processor and actions tests.
 
-Run with test settings so DATABASES and INSTALLED_APPS are correct:
+Run with:
 
-    python manage.py test sms_marketing.tests --settings=acs_personalization.settings.test
+    python -m pytest sms_marketing/tests/test_processor_actions.py
 """
 from django.test import TestCase
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 class SMSMarketingProcessorFallbackTests(TestCase):

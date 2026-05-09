@@ -4,37 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/catalog/models/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/catalog/models/platforms.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/planning/models/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/planning/models/campaigns.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/targeting/mixins.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/base.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/ENHANCED_SQS_GUIDE.md" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/ENHANCED_SQS_GUIDE.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/services/sms_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/services/sms_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/tests/test_sms_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/tests/test_sms_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/communication_processor/utils/message_builder.py" beforeDir="false" afterPath="$PROJECT_DIR$/communication_processor/utils/message_builder.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/external_references.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/external_references.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/link_tracking/models/campaign.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/models/campaign.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/link_tracking/models/campaign_mapping.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/models/campaign_mapping.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/link_tracking/models/link.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/models/link.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/link_tracking/services/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/services/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/link_tracking/services/runtime_publisher.py" beforeDir="false" afterPath="$PROJECT_DIR$/link_tracking/services/runtime_publisher.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared_services/campaign_matching_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/campaign_matching_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/campaign.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/campaign.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/event.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/event.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/message.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/message.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/models/subscriber_campaign_subscription.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/models/subscriber_campaign_subscription.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/actions.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/actions.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/message_sender.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/message_sender.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sms_marketing/services/state.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/state.py" afterDir="false" />
-    </list>
+    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
