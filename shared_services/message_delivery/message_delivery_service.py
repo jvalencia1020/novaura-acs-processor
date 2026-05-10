@@ -42,6 +42,7 @@ class MessageDeliveryService:
         channel_config=None,
         email_context=None,
         log_context: Optional[Dict[str, Any]] = None,
+        media_campaign=None,
     ):
         """
         Send a message through the specified channel.
@@ -57,6 +58,7 @@ class MessageDeliveryService:
             channel_config: The channel configuration object (EmailConfig, SMSConfig, VoiceConfig, ChatConfig)
             email_context: Optional dict for Mailgun (replace_template_variables / MessageTemplate context)
             log_context: Optional dict for Mailgun structured logs (e.g. bulk_campaign_message_id).
+            media_campaign: Optional planning.MediaCampaign for nurturing attribution (email log_context).
 
         Returns:
             tuple: (success, thread_message)
@@ -68,6 +70,17 @@ class MessageDeliveryService:
             if channel == 'sms':
                 return self._send_sms(content, lead, user, service_phone, message_type)
             elif channel == 'email':
+                merged_log = dict(log_context or {})
+                if media_campaign is not None:
+                    mid = getattr(media_campaign, 'id', media_campaign)
+                    if mid is not None:
+                        merged_log['nurturing_participant_media_campaign_id'] = mid
+                # Match _send_email so callers/tests see the same log_context Mailgun receives
+                # (including when _send_email is patched).
+                merged_log.setdefault(
+                    'contact_endpoint_id',
+                    getattr(channel_config, 'from_endpoint_id', None),
+                )
                 return self._send_email(
                     content,
                     lead,
@@ -76,7 +89,7 @@ class MessageDeliveryService:
                     message_type,
                     channel_config,
                     email_context,
-                    log_context=log_context,
+                    log_context=merged_log,
                 )
             elif channel == 'voice':
                 return self._send_voice(content, lead, user, message_type, channel_config)

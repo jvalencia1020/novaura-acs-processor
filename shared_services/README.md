@@ -32,12 +32,30 @@ lead = lead_service.get_lead_from_event(event_data, phone_number)
 - `get_campaign_participant(lead, campaign)`: Get campaign participant
 - `get_active_campaigns_for_lead(lead)`: Get all active campaigns for a lead
 
+When `event_data` includes **`media_campaign_id`**, resolution prefers **`LeadNurturingParticipant.media_campaign_id`** (enrollment snapshot), then falls back to **`originating_subscription__media_campaign_id`** for legacy rows.
+
 **Usage Example**:
 ```python
 from shared_services import CampaignMatchingService
 
 campaign_service = CampaignMatchingService()
 campaign = campaign_service.find_nurturing_campaign_from_event(event_data, lead)
+```
+
+### 2b. Nurturing media campaign attribution (`nurturing_attribution`)
+
+**Purpose**: Aligns with Django `acs.services.attribution` for ACS nurturing: resolve which `planning.MediaCampaign` to snapshot at enrollment and which effective media campaign to use for outbound tagging (without `BulkCampaignMessage.media_campaign`).
+
+**Key functions** (also exported from `shared_services` package root):
+
+- `resolve_media_campaign_for_enrollment(nurturing_campaign, *, originating_subscription=None, override=None)`
+- `resolve_media_campaign_for_participant(participant)`
+
+**Usage Example**:
+```python
+from shared_services import resolve_media_campaign_for_participant
+
+media = resolve_media_campaign_for_participant(participant)
 ```
 
 ### 3. ConversationService

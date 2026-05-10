@@ -242,10 +242,32 @@ Or run `python manage.py migrate` once; Django will apply them in dependency ord
 
 ---
 
+## Part 3: Nurturing media campaign (planning) attribution
+
+### Goal
+
+Planning **MediaCampaign** is optional attribution under the same **CRM campaign** as the nurturing campaign. The canonical value for “which media flight this nurture enrollment / send belongs to” is snapshotted on **`LeadNurturingParticipant.media_campaign`** at enrollment. **`BulkCampaignMessage` does not store `media_campaign`** (Django `acs` migration 0077 removed it); processors resolve media from the participant (and fall back to subscription or campaign default when reading).
+
+### Processor behavior (this repo)
+
+- **`shared_services.nurturing_attribution`**
+  - `resolve_media_campaign_for_enrollment(nurturing_campaign, *, originating_subscription=None, override=None)` — order: override → `originating_subscription.media_campaign` → `nurturing_campaign.media_campaign`; skips candidates whose `MediaCampaign.crm_campaign_id` does not match `nurturing_campaign.crm_campaign_id` when the latter is set.
+  - `resolve_media_campaign_for_participant(participant)` — order: `participant.media_campaign` → subscription media (CRM-consistent) → `nurturing_campaign.media_campaign`.
+- **Enrollment writes:** `sms_marketing.services.actions` (`_handle_start_journey`, `_enroll_in_follow_up_nurturing_campaign_if_applicable`) and `shared_services.keyword_processing_service` (`_handle_opt_in`) set `participant.media_campaign` on create and fill when null (never overwrite an existing snapshot).
+- **Inbound matching:** `CampaignMatchingService.find_nurturing_campaign_from_event` matches `event_data['media_campaign_id']` against **`participant.media_campaign_id` first**, then `originating_subscription__media_campaign_id` for older rows.
+- **Outbound email (bulk + journey):** `MessageDeliveryService.send_message(..., media_campaign=...)` merges `nurturing_participant_media_campaign_id` into Mailgun `log_context` for email sends. Bulk sends pass `resolve_media_campaign_for_participant(message.participant)` from `bulk_campaign_processor`; journey email steps pass the same from `journey_processor`.
+
+### Integration checklist
+
+- Prefer **`participant.media_campaign_id`** for analytics, webhooks, and warehouse joins (`JOIN lead_nurturing_participant ...`).
+- Do not read **`bulk_campaign_message.media_campaign_id`** — that column is gone upstream.
+
+---
+
 ## Out of Scope (Not Implemented)
 
 - **handle_start_journey** in `sms_marketing.services.actions` does **not** yet set `originating_sms_message` or `originating_subscriber` on the created participant; that is left for a follow-up.
-- **BulkCampaignMessage** and **SmsMessage** do **not** have a `short_link` FK in this change; the message processor does not need to persist which link was in which sent message unless you add that later.
+- **BulkCampaignMessage** and **SmsMessage** do **not** have a `short_link` FK in this change; the message processor does not need to persist which link was in which sent message unless you add that later. **BulkCampaignMessage** also does **not** carry `media_campaign` (removed in Django `acs` 0077); use participant snapshot instead.
 - No new query params on the link (or link campaign) list API for “filter by nurturing campaign”; can be added later if needed.
 - **Double opt-in confirmation:** The handler that processes the subscriber’s “YES” reply to confirm double opt-in does **not** yet update `SmsSubscriberCampaignSubscription` to `status = 'opted_in'`; that is left for the processor engineer (see Part 5 integration notes).
 - **SmsSubscriberCampaignSubscription** is not yet exposed in the SmsSubscriber or campaign API (no `campaign_subscriptions` field or dedicated subscription endpoint); optional follow-up.

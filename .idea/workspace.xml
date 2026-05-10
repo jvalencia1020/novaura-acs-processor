@@ -4,7 +4,20 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="" />
+    <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/LINK_TRACKING_AND_NURTURING_ATTRIBUTION_CHANGES.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/LINK_TRACKING_AND_NURTURING_ATTRIBUTION_CHANGES.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/services/journey_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/journey_processor/tests/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/journey_processor/tests/conftest.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/campaign_matching_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/campaign_matching_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/keyword_processing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/keyword_processing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/message_delivery/message_delivery_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/message_delivery/message_delivery_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared_services/tests/test_campaign_matching_media_attribution.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared_services/tests/test_campaign_matching_media_attribution.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sms_marketing/services/actions.py" beforeDir="false" afterPath="$PROJECT_DIR$/sms_marketing/services/actions.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -62,7 +75,7 @@
       <recent name="$PROJECT_DIR$/marketing_tracking/models" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.process_due_messages">
+  <component name="RunManager" selected="Python.process_bulk_campaigns">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />
@@ -317,27 +330,27 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>456</line>
+          <line>469</line>
           <option name="timeStamp" value="45" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
-          <line>75</line>
+          <line>76</line>
           <option name="timeStamp" value="46" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
-          <line>118</line>
+          <line>119</line>
           <option name="timeStamp" value="47" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/shared_services/keyword_processing_service.py</url>
-          <line>109</line>
+          <line>110</line>
           <option name="timeStamp" value="48" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>930</line>
+          <line>943</line>
           <option name="timeStamp" value="49" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -352,7 +365,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/external_models/models/nurturing_campaigns.py</url>
-          <line>216</line>
+          <line>240</line>
           <option name="timeStamp" value="67" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -372,12 +385,12 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/external_models/models/nurturing_campaigns.py</url>
-          <line>674</line>
+          <line>698</line>
           <option name="timeStamp" value="80" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>938</line>
+          <line>951</line>
           <option name="timeStamp" value="82" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -392,7 +405,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>952</line>
+          <line>965</line>
           <option name="timeStamp" value="89" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -407,7 +420,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/sms_marketing/services/actions.py</url>
-          <line>804</line>
+          <line>823</line>
           <option name="timeStamp" value="106" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -427,7 +440,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>316</line>
+          <line>325</line>
           <option name="timeStamp" value="122" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -447,7 +460,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>89</line>
+          <line>90</line>
           <option name="timeStamp" value="127" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
@@ -457,17 +470,17 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>275</line>
+          <line>284</line>
           <option name="timeStamp" value="129" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>310</line>
+          <line>319</line>
           <option name="timeStamp" value="130" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py</url>
-          <line>997</line>
+          <line>1010</line>
           <option name="timeStamp" value="131" />
         </line-breakpoint>
       </breakpoints>

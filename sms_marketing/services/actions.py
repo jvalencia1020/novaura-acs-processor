@@ -19,6 +19,7 @@ from sms_marketing.models import (
 from sms_marketing.services.message_sender import SMSMarketingMessageSender
 from sms_marketing.services.attribution import resolve_crm_and_media_campaign
 from sms_marketing.services.lead_attribution import maybe_fill_lead_media_campaign
+from shared_services.nurturing_attribution import resolve_media_campaign_for_enrollment
 
 logger = logging.getLogger(__name__)
 
@@ -313,11 +314,17 @@ class SMSMarketingActionExecutor:
             subscription.save(update_fields=update_sub)
 
         lead_for_participant = subscription.lead or lead
+        participant_media = resolve_media_campaign_for_enrollment(
+            nurturing_campaign,
+            originating_subscription=subscription,
+            override=media_campaign,
+        )
         defaults = {
             'status': 'active',
             'originating_subscription': subscription,
             'created_by_id': created_by_id,
             'metadata': {},  # DB column is NOT NULL
+            'media_campaign': participant_media,
         }
         participant, created = LeadNurturingParticipant.objects.get_or_create(
             lead=lead_for_participant,
@@ -328,6 +335,9 @@ class SMSMarketingActionExecutor:
         if participant.originating_subscription_id != subscription.id:
             participant.originating_subscription = subscription
             participant.save(update_fields=['originating_subscription_id'])
+        if participant_media is not None and not getattr(participant, 'media_campaign_id', None):
+            participant.media_campaign = participant_media
+            participant.save(update_fields=['media_campaign'])
 
         # Enqueue first step (this would trigger journey processor)
         # You may need to enqueue a task here to start the journey
@@ -688,11 +698,17 @@ class SMSMarketingActionExecutor:
             subscription.save(update_fields=update_sub)
 
         lead_for_participant = subscription.lead or lead
+        participant_media = resolve_media_campaign_for_enrollment(
+            nurturing_campaign,
+            originating_subscription=subscription,
+            override=media_campaign,
+        )
         defaults = {
             'status': 'active',
             'originating_subscription': subscription,
             'created_by_id': created_by_id,
             'metadata': {},  # DB column is NOT NULL
+            'media_campaign': participant_media,
         }
         participant, created = LeadNurturingParticipant.objects.get_or_create(
             lead=lead_for_participant,
@@ -703,6 +719,9 @@ class SMSMarketingActionExecutor:
         if participant.originating_subscription_id != subscription.id:
             participant.originating_subscription = subscription
             participant.save(update_fields=['originating_subscription_id'])
+        if participant_media is not None and not getattr(participant, 'media_campaign_id', None):
+            participant.media_campaign = participant_media
+            participant.save(update_fields=['media_campaign'])
         return participant
 
     def _get_or_create_conversation(self, subscriber: SmsSubscriber, endpoint, lead=None):

@@ -8,6 +8,10 @@ from .campaign_matching_service import CampaignMatchingService
 from .conversation_service import ConversationService
 from .keyword_processing_service import KeywordProcessingService
 from .ai_agent_service import AIAgentService
+from .nurturing_attribution import (
+    resolve_media_campaign_for_enrollment,
+    resolve_media_campaign_for_participant,
+)
 
 __all__ = [
     'MessageDeliveryService',
@@ -20,4 +24,6 @@ __all__ = [
     'ConversationService',
     'KeywordProcessingService',
     'AIAgentService',
+    'resolve_media_campaign_for_enrollment',
+    'resolve_media_campaign_for_participant',
 ] 

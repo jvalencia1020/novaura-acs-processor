@@ -111,6 +111,15 @@ class LeadNurturingCampaign(models.Model):
     )
     content = models.TextField(blank=True, null=True)
     crm_campaign = models.ForeignKey(Campaign, on_delete=models.SET_NULL, null=True, blank=True, related_name='nurturing_campaigns')
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='nurturing_campaigns',
+        help_text='Default media (planning) campaign. Must belong to crm_campaign when both are set.',
+    )
 
     # OneToOne fields for the shared channel config models
     email_config = models.OneToOneField(EmailConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
@@ -153,12 +162,13 @@ class LeadNurturingCampaign(models.Model):
             models.Index(fields=['status']),
             models.Index(fields=['is_ongoing']),
             models.Index(fields=['status_changed_at']),
+            models.Index(fields=['crm_campaign', 'media_campaign']),
         ]
 
     def clean(self):
         """Validate campaign configuration"""
         super().clean()
-        
+
         # Validate end date only if not an ongoing campaign
         if not self.is_ongoing and self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValidationError("End date must be after start date")
@@ -171,6 +181,20 @@ class LeadNurturingCampaign(models.Model):
                 raise ValidationError("Channel is required for bulk campaigns")
             if not self.template and not self.content:
                 raise ValidationError("Either template or content is required for bulk campaigns")
+
+        if self.media_campaign_id:
+            if not self.crm_campaign_id:
+                raise ValidationError({
+                    'media_campaign': 'CRM campaign is required when media_campaign is set.',
+                })
+            if self.media_campaign.crm_campaign_id != self.crm_campaign_id:
+                raise ValidationError({
+                    'media_campaign': 'Media campaign must belong to the selected CRM campaign.',
+                })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def update_status(self, new_status, user):
         """
@@ -1005,6 +1029,15 @@ class LeadNurturingParticipant(models.Model):
         related_name='nurturing_participants_enrolled',
         help_text='Campaign-level opt-in subscription that triggered enrollment (subscriber, campaign, opt_in_rule, opt_in_message).',
     )
+    media_campaign = models.ForeignKey(
+        'planning.MediaCampaign',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name='nurturing_participants',
+        help_text='Snapshotted at enrollment from override / originating_subscription / nurturing_campaign default.',
+    )
 
     class Meta:
         managed = False
@@ -1020,6 +1053,7 @@ class LeadNurturingParticipant(models.Model):
             models.Index(fields=['entered_campaign_at']),
             models.Index(fields=['exited_campaign_at']),
             models.Index(fields=['originating_subscription']),
+            models.Index(fields=['lead', 'media_campaign']),
         ]
 
     def __str__(self):
@@ -1028,10 +1062,17 @@ class LeadNurturingParticipant(models.Model):
     def clean(self):
         """Validate participant configuration"""
         super().clean()
-        
+
         # For journey-based campaigns, journey is required
         if self.nurturing_campaign and self.nurturing_campaign.campaign_type == 'journey' and not self.nurturing_campaign.journey:
             raise ValidationError("Journey is required for journey-based campaigns")
+
+        if self.media_campaign_id and self.nurturing_campaign_id:
+            nc_crm_id = self.nurturing_campaign.crm_campaign_id
+            if nc_crm_id and self.media_campaign.crm_campaign_id != nc_crm_id:
+                raise ValidationError({
+                    'media_campaign': 'Media campaign must belong to the nurturing campaign CRM campaign.',
+                })
 
     def move_to_next_step(self, next_step, event_type='enter_step', metadata=None):
         """Move participant to next step and create event"""

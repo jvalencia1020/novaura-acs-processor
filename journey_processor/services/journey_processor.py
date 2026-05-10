@@ -21,6 +21,7 @@ from external_models.models.accounts import User
 from journey_processor.services.condition_evaluator import ConditionEvaluator
 from django.conf import settings
 from shared_services.message_delivery import MessageDeliveryService
+from shared_services.nurturing_attribution import resolve_media_campaign_for_participant
 from shared_services.template_variable_render import build_nested_template_context
 
 logger = logging.getLogger(__name__)
@@ -86,9 +87,11 @@ class JourneyProcessor:
             'current_journey_step',
             'nurturing_campaign',
             'nurturing_campaign__journey',
+            'nurturing_campaign__media_campaign',
             'lead',
             'originating_subscription',
             'originating_subscription__media_campaign',
+            'media_campaign',
         )
 
         logger.debug(f"Found {active_participants.count()} active participants")
@@ -144,6 +147,9 @@ class JourneyProcessor:
                     LeadNurturingParticipant.objects.select_related(
                         'originating_subscription',
                         'originating_subscription__media_campaign',
+                        'nurturing_campaign',
+                        'nurturing_campaign__media_campaign',
+                        'media_campaign',
                     ).get(
                         id=participant_id,
                         status='active',
@@ -162,9 +168,11 @@ class JourneyProcessor:
                     'current_journey_step',
                     'nurturing_campaign',
                     'nurturing_campaign__journey',
+                    'nurturing_campaign__media_campaign',
                     'lead',
                     'originating_subscription',
                     'originating_subscription__media_campaign',
+                    'media_campaign',
                 )
             except Exception as e:
                 logger.warning(f"Error finding participants for lead {lead_id}: {e}")
@@ -408,6 +416,7 @@ class JourneyProcessor:
                 merged_body = template.replace_variables(email_context)
             else:
                 merged_body = ''
+            participant_media = resolve_media_campaign_for_participant(participant)
             success, thread_message = self.message_delivery.send_message(
                 channel='email',
                 content=merged_body,
@@ -416,6 +425,7 @@ class JourneyProcessor:
                 subject=template.subject if hasattr(template, 'subject') else None,
                 channel_config=step.email_config,
                 email_context=email_context,
+                media_campaign=participant_media,
             )
 
             if success:

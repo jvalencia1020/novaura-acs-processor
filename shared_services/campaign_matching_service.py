@@ -23,15 +23,22 @@ class CampaignMatchingService:
         Returns:
             LeadNurturingCampaign or None
         """
-        # Prefer explicit media attribution on the envelope (matches SMS opt-in subscription)
+        # Prefer explicit media attribution on the envelope (participant snapshot first,
+        # then originating_subscription for enrollments predating snapshot column).
         media_campaign_id = event_data.get('media_campaign_id')
         if media_campaign_id and lead:
             try:
                 participant = LeadNurturingParticipant.objects.filter(
                     lead=lead,
                     status='active',
-                    originating_subscription__media_campaign_id=media_campaign_id,
+                    media_campaign_id=media_campaign_id,
                 ).select_related('nurturing_campaign').first()
+                if not participant:
+                    participant = LeadNurturingParticipant.objects.filter(
+                        lead=lead,
+                        status='active',
+                        originating_subscription__media_campaign_id=media_campaign_id,
+                    ).select_related('nurturing_campaign').first()
                 if participant and participant.nurturing_campaign:
                     return participant.nurturing_campaign
             except Exception as e:

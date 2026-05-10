@@ -31,6 +31,7 @@ from django.conf import settings
 import time
 
 from shared_services.message_delivery import MessageDeliveryService
+from shared_services.nurturing_attribution import resolve_media_campaign_for_participant
 from shared_services.template_variable_render import build_nested_template_context
 from shared_services.message_validation_service import MessageValidationService
 from shared_services.time_calculation_service import TimeCalculationService
@@ -207,8 +208,12 @@ class BulkCampaignProcessor:
             'campaign__blast_schedule__short_link',
             'participant',
             'participant__lead',
+            'participant__nurturing_campaign',
+            'participant__nurturing_campaign__media_campaign',
             'participant__originating_subscription',
             'participant__originating_subscription__media_campaign',
+            'participant__media_campaign',
+            'campaign__media_campaign',
             'participant__originating_subscription__opt_in_rule',
             'participant__originating_subscription__opt_in_rule__short_link',
             'participant__originating_subscription__opt_in_rule__keyword',
@@ -254,11 +259,15 @@ class BulkCampaignProcessor:
                     'campaign__blast_schedule__short_link',
                     'participant',
                     'participant__lead',
+                    'participant__nurturing_campaign',
+                    'participant__nurturing_campaign__media_campaign',
                     'participant__originating_subscription',
                     'participant__originating_subscription__opt_in_rule',
                     'participant__originating_subscription__opt_in_rule__short_link',
                     'participant__originating_subscription__opt_in_rule__keyword',
                     'participant__originating_subscription__media_campaign',
+                    'participant__media_campaign',
+                    'campaign__media_campaign',
                     'drip_message_step',
                     'drip_message_step__short_link',
                     'reminder_message',
@@ -369,8 +378,12 @@ class BulkCampaignProcessor:
             'campaign__blast_schedule__short_link',
             'participant',
             'participant__lead',
+            'participant__nurturing_campaign',
+            'participant__nurturing_campaign__media_campaign',
             'participant__originating_subscription',
             'participant__originating_subscription__media_campaign',
+            'participant__media_campaign',
+            'campaign__media_campaign',
             'participant__originating_subscription__opt_in_rule',
             'participant__originating_subscription__opt_in_rule__short_link',
             'participant__originating_subscription__opt_in_rule__keyword',
@@ -1166,6 +1179,8 @@ class BulkCampaignProcessor:
                 if channel_config and getattr(channel_config, 'from_endpoint_id', None):
                     log_context['contact_endpoint_id'] = channel_config.from_endpoint_id
 
+            participant_media = resolve_media_campaign_for_participant(participant)
+
             # Send message using the delivery service
             success, thread_message = self.message_delivery.send_message(
                 channel=campaign.channel,
@@ -1178,6 +1193,7 @@ class BulkCampaignProcessor:
                 channel_config=channel_config,  # Pass channel configuration to delivery service
                 email_context=email_context,
                 log_context=log_context,
+                media_campaign=participant_media,
             )
 
             if success:

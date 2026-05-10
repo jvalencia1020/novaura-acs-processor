@@ -3,6 +3,7 @@ from typing import Optional, Dict, Any
 from django.db import transaction
 from external_models.models.external_references import Lead
 from external_models.models.nurturing_campaigns import LeadNurturingCampaign, LeadNurturingParticipant
+from shared_services.nurturing_attribution import resolve_media_campaign_for_enrollment
 
 logger = logging.getLogger(__name__)
 
@@ -197,17 +198,27 @@ class KeywordProcessingService:
         
         if nurturing_campaign:
             # Opt in to specific campaign
+            participant_media = resolve_media_campaign_for_enrollment(nurturing_campaign)
             participant, created = LeadNurturingParticipant.objects.get_or_create(
                 lead=lead,
                 nurturing_campaign=nurturing_campaign,
-                defaults={'status': 'active'}
+                defaults={
+                    'status': 'active',
+                    'media_campaign': participant_media,
+                },
             )
-            
+            if participant_media is not None and not getattr(participant, 'media_campaign_id', None):
+                participant.media_campaign = participant_media
+                participant.save(update_fields=['media_campaign'])
+
             if not created and participant.status == 'opted_out':
                 participant.status = 'active'
                 participant.exited_campaign_at = None
                 participant.save()
-                
+                if participant_media is not None and not getattr(participant, 'media_campaign_id', None):
+                    participant.media_campaign = participant_media
+                    participant.save(update_fields=['media_campaign'])
+
                 # Send opt-in confirmation message
                 if self.message_sender:
                     success = self.message_sender.send_opt_in_confirmation(contact_info, nurturing_campaign.name, twilio_number)
