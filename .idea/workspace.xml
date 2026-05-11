@@ -5,13 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71e82ba0-95bd-4eef-a185-63f8ae7c3520" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/acs/models/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/acs/models/send_caps.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/base.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/acs_personalization/settings/test.py" beforeDir="false" afterPath="$PROJECT_DIR$/acs_personalization/settings/test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bulkcampaign_processor/services/bulk_campaign_processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" beforeDir="false" afterPath="$PROJECT_DIR$/external_models/models/nurturing_campaigns.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/terraform_ownership_and_transfer.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/terraform_ownership_and_transfer.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -40,27 +35,27 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.process_bulk_campaigns.executor": "Run",
-    "Python.process_due_messages.executor": "Run",
-    "Python.reprocess_sms_messages.executor": "Run",
-    "Python.run_bulk_campaign_processor.executor": "Run",
-    "Python.sms_marketing_messages.executor": "Run",
-    "Python.worker.executor": "Run",
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "ai.playground.ignore.import.keys.banner.in.settings": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/acs/models",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.process_bulk_campaigns.executor&quot;: &quot;Run&quot;,
+    &quot;Python.process_due_messages.executor&quot;: &quot;Run&quot;,
+    &quot;Python.reprocess_sms_messages.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_bulk_campaign_processor.executor&quot;: &quot;Run&quot;,
+    &quot;Python.sms_marketing_messages.executor&quot;: &quot;Run&quot;,
+    &quot;Python.worker.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/jhonvalencia/Documents/Projects/novaura-acs-processor/acs/models&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/acs/models" />
@@ -70,7 +65,7 @@
       <recent name="$PROJECT_DIR$/link_tracking" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.process_bulk_campaigns">
+  <component name="RunManager" selected="Python.sms_marketing_messages">
     <configuration name="dev" type="PythonConfigurationType" factoryName="Python">
       <module name="novaura-acs-processor" />
       <option name="ENV_FILES" value="" />

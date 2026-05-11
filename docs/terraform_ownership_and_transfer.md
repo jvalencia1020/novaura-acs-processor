@@ -1,4 +1,4 @@
-# Terraform ownership and transfer (acs_processor app repo)
+# Terraform ownership and transfer (acs_processor app repo) 
 
 This document records the transfer of **shared networking resources** from this app repo to the **main/shared Terraform repo**.
 
