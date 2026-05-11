@@ -558,6 +558,21 @@ class BulkCampaignMessage(models.Model):
         db_index=True,
         help_text="Twilio (or other provider) message SID when this bulk message was sent; used to match inbound replies."
     )
+    next_eligible_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            'When this message becomes eligible to send again after being deferred '
+            '(e.g. by a send cap). Set by the external dispatcher.'
+        ),
+    )
+    deferral_reason = models.CharField(
+        max_length=120,
+        blank=True,
+        default='',
+        help_text='Free-form reason the dispatcher last deferred this message. e.g. "cap:hourly:42".',
+    )
 
     class Meta:
         managed = False
@@ -573,6 +588,7 @@ class BulkCampaignMessage(models.Model):
             models.Index(fields=['message_group']),
             models.Index(fields=['status', 'retry_count']),
             models.Index(fields=['last_retry_at']),
+            models.Index(fields=['campaign', 'status', 'scheduled_for']),
         ]
         # Unique constraints to prevent duplicate message scheduling
         constraints = [

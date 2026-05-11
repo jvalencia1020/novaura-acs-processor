@@ -55,4 +55,9 @@ PASSWORD_HASHERS = [
 
 # Disable celery during testing
 CELERY_TASK_ALWAYS_EAGER = True
-CELERY_TASK_EAGER_PROPAGATES = True 
+CELERY_TASK_EAGER_PROPAGATES = True
+
+# Send caps: deterministic tests (enable in specific tests with override_settings)
+SEND_CAPS_ENFORCEMENT_ENABLED = True
+SEND_CAP_CLAIM_STALE_AFTER_SECONDS = 300
+SEND_CAP_REFUND_WHEN_NO_THREAD_MESSAGE = False 

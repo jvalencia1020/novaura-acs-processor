@@ -40,6 +40,13 @@ from shared_services.message_group_service import MessageGroupService
 from link_tracking.services.runtime_publisher import ensure_link_published
 from bulkcampaign_processor.utils.timezone_utils import convert_from_utc
 from bulkcampaign_processor.utils.short_link import build_bulk_short_url
+from bulkcampaign_processor.services.send_cap_service import (
+    clear_send_cap_claim_metadata,
+    reconcile_stale_send_cap_claims,
+    refund_send_slot,
+    should_refund_after_send_failure,
+    try_claim_send_slot,
+)
 from sms_marketing.models import SmsSubscriberCampaignSubscription
 
 logger = logging.getLogger(__name__)
@@ -196,6 +203,13 @@ class BulkCampaignProcessor:
         Returns:
             int: Number of messages processed
         """
+        try:
+            reconciled = reconcile_stale_send_cap_claims()
+            if reconciled:
+                logger.info('send_cap_stale_reconciled_batch count=%s', reconciled)
+        except Exception:
+            logger.exception('reconcile_stale_send_cap_claims failed')
+
         # Find all pending messages that are due from active campaigns only
         due_messages = BulkCampaignMessage.objects.filter(
             status__in=['pending', 'scheduled', 'failed', 'retry'],  # Include retry status for retry functionality
@@ -970,6 +984,7 @@ class BulkCampaignProcessor:
 
     def _send_message(self, message):
         """Send a scheduled message"""
+        claim = None
         try:
             # Get campaign and participant
             campaign = message.campaign
@@ -1181,6 +1196,57 @@ class BulkCampaignProcessor:
 
             participant_media = resolve_media_campaign_for_participant(participant)
 
+            claim = try_claim_send_slot(
+                campaign=campaign,
+                channel=campaign.channel,
+                message_type=message.message_type,
+            )
+            if not claim.allowed:
+                message.scheduled_for = claim.next_reset_at
+                message.next_eligible_at = claim.next_reset_at
+                if claim.blocking_cap_id is not None and claim.blocking_cap_period:
+                    message.deferral_reason = f'cap:{claim.blocking_cap_period}:{claim.blocking_cap_id}'
+                else:
+                    message.deferral_reason = ''
+                message.update_status(
+                    'scheduled',
+                    {
+                        'cap_deferral': {
+                            'cap_id': claim.blocking_cap_id,
+                            'period': claim.blocking_cap_period,
+                            'next_reset_at': claim.next_reset_at.isoformat() if claim.next_reset_at else None,
+                        },
+                    },
+                )
+                logger.info(
+                    'send_cap_deferred bulk_campaign_message_id=%s campaign_id=%s cap_id=%s period=%s next_reset_at=%s',
+                    message.id,
+                    campaign.id,
+                    claim.blocking_cap_id,
+                    claim.blocking_cap_period,
+                    claim.next_reset_at,
+                )
+                return False
+
+            if claim.claim_token and claim.bucket_ids:
+                message.update_status(
+                    message.status,
+                    {
+                        'send_cap_claim': {
+                            'claim_token': claim.claim_token,
+                            'bucket_ids': list(claim.bucket_ids),
+                            'claimed_at': claim.claimed_at.isoformat() if claim.claimed_at else None,
+                        },
+                    },
+                )
+                logger.info(
+                    'send_cap_claim_granted bulk_campaign_message_id=%s campaign_id=%s token=%s bucket_ids=%s',
+                    message.id,
+                    campaign.id,
+                    claim.claim_token,
+                    list(claim.bucket_ids),
+                )
+
             # Send message using the delivery service
             success, thread_message = self.message_delivery.send_message(
                 channel=campaign.channel,
@@ -1197,6 +1263,9 @@ class BulkCampaignProcessor:
             )
 
             if success:
+                if claim and claim.claim_token and claim.bucket_ids:
+                    message.metadata = clear_send_cap_claim_metadata(message.metadata or {})
+                    message.save(update_fields=['metadata', 'updated_at'])
                 # Update message status (persist idempotency key for email bulk sends)
                 if campaign.channel == 'email' and email_send_idempotency_key:
                     message.update_status('sent', {'send_idempotency_key': email_send_idempotency_key})
@@ -1242,9 +1311,28 @@ class BulkCampaignProcessor:
 
             # Message failed to send
             logger.warning(f"Failed to send message {message.id} (retry attempt: {message.retry_count})")
+            if claim and claim.bucket_ids and should_refund_after_send_failure(success, thread_message):
+                refund_send_slot(claim=claim)
+                logger.info(
+                    'send_cap_refunded bulk_campaign_message_id=%s token=%s bucket_ids=%s reason=send_failure',
+                    message.id,
+                    getattr(claim, 'claim_token', None),
+                    list(claim.bucket_ids),
+                )
             return False
 
         except Exception as e:
+            if claim and getattr(claim, 'bucket_ids', ()):
+                try:
+                    refund_send_slot(claim=claim)
+                    logger.info(
+                        'send_cap_refunded bulk_campaign_message_id=%s token=%s bucket_ids=%s reason=exception',
+                        message.id,
+                        getattr(claim, 'claim_token', None),
+                        list(claim.bucket_ids),
+                    )
+                except Exception:
+                    logger.exception('send_cap_refund_after_exception_failed bulk_campaign_message_id=%s', message.id)
             logger.exception(f"Error sending message {message.id}: {e}")
             message.update_status('failed', {'error': str(e)})
             return False

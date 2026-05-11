@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'planning',
     'targeting',
     'catalog',
+    'acs',
 ]
 
 MIDDLEWARE = [
@@ -157,6 +158,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Journey processor settings
 JOURNEY_EVENTS_QUEUE_URL = os.getenv('JOURNEY_EVENTS_QUEUE_URL')
 JOURNEY_PROCESSOR_LOG_LEVEL = os.getenv('JOURNEY_PROCESSOR_LOG_LEVEL', 'INFO')
+
+# Nurturing send caps (dispatcher): claim/refund at bulk send time
+SEND_CAPS_ENFORCEMENT_ENABLED = os.getenv('SEND_CAPS_ENFORCEMENT_ENABLED', 'True').lower() == 'true'
+SEND_CAP_CLAIM_STALE_AFTER_SECONDS = int(os.getenv('SEND_CAP_CLAIM_STALE_AFTER_SECONDS', '300'))
+# Default False: prefer under-send vs over-send; set True to refund when provider returns (False, None)
+SEND_CAP_REFUND_WHEN_NO_THREAD_MESSAGE = os.getenv('SEND_CAP_REFUND_WHEN_NO_THREAD_MESSAGE', 'False').lower() == 'true'
 
 # SQS Queue URLs for communication processor
 SMS_QUEUE_URL = os.getenv('SMS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/054037109114/novaura-acs-sms-events')
