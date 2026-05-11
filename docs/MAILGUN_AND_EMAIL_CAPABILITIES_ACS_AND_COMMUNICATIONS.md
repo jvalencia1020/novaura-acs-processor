@@ -1,6 +1,6 @@
 # Mailgun and email capabilities (ACS and communications)
 
-This document summarizes how **Mailgun** is integrated for outbound email, optional **domain template sync**, and **inbound / event webhooks** across the **communications**, **ACS** (account configuration / nurturing), **CRM** (lead actions), and **communication_processor** Django apps.
+This document summarizes how **Mailgun** and **Postmark** are integrated for outbound email, optional **domain template sync**, and **inbound / event webhooks** across the **communications**, **ACS** (account configuration / nurturing), **CRM** (lead actions), and **communication_processor** Django apps.
 
 ---
 
@@ -8,7 +8,7 @@ This document summarizes how **Mailgun** is integrated for outbound email, optio
 
 | Layer | Role |
 |-------|------|
-| **communications** | `ContactEndpoint` + `ContactEndpointEmailSettings` (provider, non-secret `config`, Secrets Manager ARN). Provider registry resolves **`MailgunEmailAdapter`**. `email_dispatch` loads credentials and calls `adapter.send` or `adapter.send_template`. |
+| **communications** | `ContactEndpoint` + `ContactEndpointEmailSettings` (provider, non-secret `config`, Secrets Manager ARN). Provider registry resolves **`MailgunEmailAdapter`** or **`PostmarkEmailAdapter`**. `email_dispatch` loads credentials and calls `adapter.send`. |
 | **communications** (API) | Authenticated **`POST /api/communications/send-contact-email/`** sends arbitrary HTML/text using the endpoint’s configured provider (Mailgun when `provider=mailgun`). |
 | **ACS** | **`EmailConfig`** chooses how body/subject are built (`inline` vs **`outbound_acs`**). **`OutboundEmailTemplate` / `OutboundEmailTemplateVersion`** hold ACS-owned HTML with approval workflow; optional **push** copies approved versions to Mailgun domain templates. **Bulk nurturing** sends use `send_from_email_config` → same Mailgun transport. |
 | **CRM** | Lead **`POST …/actions/send_email/`** uses **environment-variable Mailgun** (`send_via_env_mailgun_fallback`) when no contact endpoint is involved. |
@@ -23,7 +23,7 @@ This document summarizes how **Mailgun** is integrated for outbound email, optio
 ### 2.1 Data model: `ContactEndpointEmailSettings`
 
 - **One-to-one** with `ContactEndpoint` (`related_name='email_settings'`).
-- **`provider`:** `mailgun` is the **fully implemented** transactional provider (Resend / Mailchimp variants exist in the registry with varying completeness).
+- **`provider`:** `mailgun` and `postmark` are implemented outbound providers (Resend / Mailchimp variants exist in model choices with varying completeness).
 - **`config` (JSON, non-secret):** For Mailgun, validated keys include:
   - **`domain`** — sending domain (also overridable via secret `domain`).
   - **`eu_region`** (boolean) — selects EU vs US Mailgun API base (`api.eu.mailgun.net` vs `api.mailgun.net`).
@@ -47,6 +47,20 @@ Public helper: **`load_credentials_for_email_settings`** (used by webhooks and d
   - Add version (`mailgun_push_domain_template_version` — creates template on 404, else adds version)
 - **`verify_webhook_request`** — HMAC verification for **form-encoded** inbound posts and **JSON** event payloads (`event-data.token|timestamp|signature`), with timestamp skew guard.
 - **`parse_webhook_request`** — Normalizes inbound MIME (form) or event webhooks into `NormalizedEmailWebhookPayload`.
+
+### 2.2a `PostmarkEmailAdapter` (`shared_services/email/postmark.py`)
+
+- **`send`** — `POST https://api.postmarkapp.com/email` with `From`, `To`, `Subject`, `HtmlBody`, `TextBody`, optional `ReplyTo`, optional `Tag`, optional `MessageStream`, optional tracking fields, optional `Metadata`, and optional Postmark `Headers`.
+- **Credentials secret JSON:** include **`api_key`** or **`server_token`** (also accepts legacy **`POSTMARK_SERVER_TOKEN`**). These values are Postmark server tokens.
+- **`config` (JSON, non-secret):**
+  - **`message_stream`** or **`transactional_stream`** — Postmark stream name. Defaults to **`broadcast`** for nurturing/bulk campaign safety because marketing sends should use a broadcast stream.
+  - **`track_opens`** (optional boolean).
+  - **`track_links`** (optional string): one of **`None`**, **`HtmlAndText`**, **`HtmlOnly`**, **`TextOnly`**, **`Subscription`**.
+  - **`metadata`** (optional object): up to 10 key/value pairs after normalization.
+  - **`list_unsubscribe_mailto`**, **`list_unsubscribe_https`**, **`list_unsubscribe_one_click`** use the shared dispatch path; Postmark receives them as `Headers: [{"Name": ..., "Value": ...}]`.
+- **Plain `TextBody`:** When no non-empty plain body is supplied (`text_body` is `None` or explicit `""`), the final HTML is converted with the same `html_to_plain_text` helper used by Mailgun.
+- **Retries:** transient `requests.Timeout`, `requests.ConnectionError`, HTTP **5xx**, and **429** are retried with bounded exponential backoff and jitter; other **4xx** errors fail immediately.
+- **Webhooks:** Postmark webhook verification and event normalization are not implemented in this ACS processor. Add Postmark webhook ingestion in `novaura_crm_backend/communication_processor/views/` alongside the existing Mailgun webhook path.
 
 ### 2.3 Dispatch services (`shared_services/email/email_dispatch.py`)
 
@@ -150,6 +164,8 @@ Stable log prefixes and fields:
 |-------|------------------|-------------------------|
 | Success | `mailgun_send_ok` | `mailgun_message_id`, `contact_endpoint_id`, `nurturing_campaign_id`, `bulk_campaign_message_id`, `send_idempotency_key` |
 | Mailgun HTTP failure | `mailgun_send_fail` | `http_status`, `body_preview` (truncated), same ids |
+| Success | `postmark_send_ok` | `postmark_message_id`, `contact_endpoint_id`, `nurturing_campaign_id`, `bulk_campaign_message_id`, `send_idempotency_key` |
+| Postmark HTTP failure | `postmark_send_fail` | `http_status`, `ErrorCode`, `body_preview` (truncated), same ids |
 | Delivery service failure | `email_send_failed` | `error`, same id keys |
 | Bulk replay skip | `bulk_email_idempotent_skip` | `bulk_campaign_message_id`, `nurturing_campaign_id`, `send_idempotency_key`, `provider_message_id` |
 
@@ -174,7 +190,7 @@ After ACS / template merge, **`shared_services/eav_email_merge.py`** substitutes
 ## 7. Configuration checklist
 
 1. **Contact endpoint** with `channels` containing **`email`** and **`value`** = authorized From address.
-2. **`email_settings`:** `provider: mailgun`, `config.domain`, optional `eu_region`, Secrets Manager ARN with **`api_key`**.
+2. **`email_settings`:** `provider: mailgun` with `config.domain`, optional `eu_region`, Secrets Manager ARN with **`api_key`**; or `provider: postmark` with optional `message_stream` / `transactional_stream`, tracking keys, list-unsubscribe keys, and Secrets Manager ARN with **`api_key`** or **`server_token`**. The CRM source-of-truth model and database choices must also allow `postmark`.
 3. **Webhooks:** Mailgun route → above URL; secret JSON should include **`webhook_signing_key`** (or supported aliases); app must have **SQS** email events queue configured for enqueue step.
 4. **ACS outbound_acs:** Approved **`OutboundEmailTemplateVersion`**, **`EmailConfig`** linked with **`from_endpoint`** and correct mode; optional **sync-mailgun** for domain template copy.
 5. **Lead one-off email:** set **`MAILGUN_*`** env vars on the deployment that serves CRM.
@@ -219,6 +235,7 @@ Bulk and journey email sends use **`shared_services/email/`** (Mailgun `messages
 | Path | Role |
 |------|------|
 | `shared_services/email/mailgun.py` | Retries, `send_mailgun_message`, structured Mailgun logs |
+| `shared_services/email/postmark.py` | Retries, `send_postmark_email`, Postmark JSON payloads, structured Postmark logs |
 | `shared_services/email/email_dispatch.py` | `send_from_email_config`, `send_from_contact_endpoint`, `log_context`, EAV after ACS |
 | `shared_services/eav_email_merge.py` | `extract_eav_placeholders`, `apply_eav_placeholders`, `apply_eav_placeholders_to_email_parts` |
 | `external_models/models/lead_eav.py` | Unmanaged CRM EAV table mirrors |

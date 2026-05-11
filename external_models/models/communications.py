@@ -7,6 +7,19 @@ from external_models.models.reporting import BlandAICall
 # BulkCampaignMessage: use string ref below to avoid circular import (communications <- channel_configs <- nurturing_campaigns)
 
 
+POSTMARK_TRACK_LINKS_VALUES = {'None', 'HtmlAndText', 'HtmlOnly', 'TextOnly', 'Subscription'}
+
+
+def validate_email_provider_config(provider, config):
+    cfg = config or {}
+    if not isinstance(cfg, dict):
+        raise ValueError('Email provider config must be a JSON object')
+    if provider == 'postmark':
+        raw_track_links = cfg.get('track_links')
+        if raw_track_links not in (None, '') and raw_track_links not in POSTMARK_TRACK_LINKS_VALUES:
+            raise ValueError(f'postmark track_links must be one of {sorted(POSTMARK_TRACK_LINKS_VALUES)}')
+
+
 class Conversation(models.Model):
     """
     Represents a Twilio Conversation session.
@@ -516,23 +529,27 @@ class ContactEndpointEmailSettings(models.Model):
     """
     Email provider configuration for a ContactEndpoint (1:1).
     Non-secret options live in `config`; API keys live in AWS Secrets Manager (ARN on this row).
-    Unmanaged mirror of CRM communications.ContactEndpointEmailSettings.
+
+    Supported providers (see registry): mailgun (implemented), postmark, resend, mailchimp_marketing,
+    mailchimp_transactional (stubs for send until implemented).
     """
 
     PROVIDER_MAILGUN = 'mailgun'
+    PROVIDER_POSTMARK = 'postmark'
     PROVIDER_RESEND = 'resend'
     PROVIDER_MAILCHIMP_MARKETING = 'mailchimp_marketing'
     PROVIDER_MAILCHIMP_TRANSACTIONAL = 'mailchimp_transactional'
 
     PROVIDER_CHOICES = (
         (PROVIDER_MAILGUN, 'Mailgun'),
+        (PROVIDER_POSTMARK, 'Postmark'),
         (PROVIDER_RESEND, 'Resend'),
         (PROVIDER_MAILCHIMP_MARKETING, 'Mailchimp Marketing'),
         (PROVIDER_MAILCHIMP_TRANSACTIONAL, 'Mailchimp Transactional (Mandrill)'),
     )
 
     endpoint = models.OneToOneField(
-        ContactEndpoint,
+        'ContactEndpoint',
         on_delete=models.CASCADE,
         related_name='email_settings',
         help_text='Contact endpoint this email configuration applies to',
@@ -565,6 +582,13 @@ class ContactEndpointEmailSettings(models.Model):
 
     def __str__(self):
         return f'{self.get_provider_display()} for {self.endpoint_id}'
+
+    def clean(self):
+        super().clean()
+        try:
+            validate_email_provider_config(self.provider, self.config or {})
+        except ValueError as e:
+            raise ValidationError({'config': str(e)}) from e
 
 
 class ContactEndpointCampaign(models.Model):
